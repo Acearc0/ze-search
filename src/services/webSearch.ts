@@ -455,15 +455,24 @@ export const WEB_SEARCH_TOOL = {
   }
 }
 
+/** 注入模型的最大结果条数：过多结果反而稀释注意力、带偏答案 */
+const MAX_INJECTED_RESULTS = 3
+/** 单条摘要最大长度，避免无关长文占用上下文 */
+const MAX_SNIPPET_CHARS = 300
+
 /** 把搜索结果格式化为回传给模型的 tool content（带编号来源，要求模型在答案中引用） */
 export function formatSearchResultsForModel(resp: SearchResponse): string {
-  const lines = resp.sources.map((s, i) => {
+  const kept = resp.sources.slice(0, MAX_INJECTED_RESULTS)
+  const lines = kept.map((s, i) => {
     const title = s.title ? s.title : s.url
-    const snippet = s.snippet ? `\n${s.snippet}` : ''
+    const rawSnippet = s.snippet || ''
+    const snippet = rawSnippet
+      ? `\n${rawSnippet.length > MAX_SNIPPET_CHARS ? `${rawSnippet.slice(0, MAX_SNIPPET_CHARS)}…` : rawSnippet}`
+      : ''
     return `[${i + 1}] ${title} (${s.url})${snippet}`
   })
   const header = `联网搜索结果（引擎: ${resp.engine}）${resp.fallbackNote ? ` [${resp.fallbackNote}]` : ''}:`
-  return `${header}\n${lines.join('\n')}\n请基于以上搜索结果作答；若使用了搜索结果，在 answer 正文末尾追加来源，格式：（来源: 1. ${resp.sources[0]?.url ?? 'https://...'}${resp.sources.length > 1 ? ' 2. ...' : ''}）`
+  return `${header}\n${lines.join('\n')}\n请以你自身的知识为主作答，搜索结果仅作补充与校验：仅采用与题干直接相关的结果，无关内容直接忽略；若结果与题干事实或学科常识冲突，以题干与常识为准。若确实使用了搜索结果，在 answer 正文末尾追加来源，格式：（来源: 1. ${kept[0]?.url ?? 'https://...'}${kept.length > 1 ? ' 2. ...' : ''}）`
 }
 
 /**
