@@ -14,6 +14,21 @@ const SYSTEM_RULES = `你是专业答题助手。最终只输出一行 JSON：{"
 /** 联网搜索开启时追加到 system 规则的搜索引导（仅在 webSearch.enabled 时注入） */
 const SEARCH_GUIDANCE = `当题目涉及时效性信息、你不确定答案、或需要查证事实时，先调用 web_search 工具（参数 query 为题目核心关键词，去掉选项文本与题号），拿到搜索结果后再按上述规则输出答案 JSON；若答案依据了搜索结果，在 answer 正文末尾追加来源，格式：（来源: 1. https://... 2. https://...）。未调用工具或工具失败时直接凭自身知识作答。`
 
+/** 自由问答（无结构化题干）时的搜索引导 */
+const FREE_FORM_SEARCH_GUIDANCE = `当时效性信息、你不确定的问题或需要查证的事实时，先调用 web_search 工具；若答案依据了搜索结果，在回答末尾追加来源，格式：（来源: 1. https://... 2. https://...）。`
+
+/**
+ * 当前日期提示：模型训练数据截止时间早于今天，若不告知会导致搜索词缺少年份、
+ * 误把旧年份的结果当成「今天」的内容。仅在联网搜索开启时注入，关闭态 prompt 保持原样。
+ */
+const buildTodayLine = () => {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth() + 1
+  const d = now.getDate()
+  return `当前日期：${y}年${m}月${d}日。涉及「今天/最新/今年」等时效性问题时，请在搜索 query 中包含该年份与日期，并优先采用与该日期相符的结果；若搜索结果明显属于旧年份，请在答案中说明这一限制，不要把它当作今天发生的事。`
+}
+
 const SINGLE_SHOTS: FewShotPair[] = [
   {
     user: `【题目类型：单选题】
@@ -131,15 +146,24 @@ const shotsForKind = (kind: AnswerFewShotKind): FewShotPair[] => {
  * system 规则 → 例题 user/assistant 对 → 当前题目 user
  */
 export const buildAnswerChatMessages = (query: string): ChatMessage[] => {
+  // 联网搜索开启时，在 system 规则中追加搜索引导与当前日期；关闭时与现状完全一致
+  const searchEnabled = useSettings().settings.webSearch?.enabled === true
+
   if (!shouldAttachAnswerFewShot(query)) {
-    return [{ role: 'user', content: query }]
+    if (!searchEnabled) {
+      return [{ role: 'user', content: query }]
+    }
+    return [
+      { role: 'system', content: `${buildTodayLine()}\n${FREE_FORM_SEARCH_GUIDANCE}` },
+      { role: 'user', content: query }
+    ]
   }
 
   const kind = detectAnswerFewShotKind(query)
   const shots = shotsForKind(kind)
-  // 联网搜索开启时，在 system 规则中追加搜索引导；关闭时与现状完全一致
-  const searchEnabled = useSettings().settings.webSearch?.enabled === true
-  const systemContent = searchEnabled ? `${SYSTEM_RULES}\n${SEARCH_GUIDANCE}` : SYSTEM_RULES
+  const systemContent = searchEnabled
+    ? `${SYSTEM_RULES}\n${SEARCH_GUIDANCE}\n${buildTodayLine()}`
+    : SYSTEM_RULES
   const messages: ChatMessage[] = [{ role: 'system', content: systemContent }]
 
   for (const shot of shots) {
