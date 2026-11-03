@@ -392,7 +392,7 @@ pub fn run() {
                     tauri::image::Image::from_bytes(include_bytes!("../icons/128x128@2x.png"))
                         .expect("window icon png");
                 let built = tauri::WebviewWindowBuilder::new(app, "main", url)
-                    .title("ZError")
+                    .title("ZError Search")
                     .inner_size(main_window_size.width, main_window_size.height)
                     .min_inner_size(main_window_size.min_width, main_window_size.min_height)
                     .center()
