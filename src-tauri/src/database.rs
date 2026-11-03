@@ -314,7 +314,7 @@ fn get_db_path() -> String {
     {
         let username = get_username().unwrap_or_else(|_| "Administrator".to_string());
         format!(
-            "C:\\Users\\{}\\AppData\\Local\\ZError\\airesponses.db",
+            "C:\\Users\\{}\\AppData\\Local\\ZErrorSearch\\airesponses.db",
             username
         )
     }

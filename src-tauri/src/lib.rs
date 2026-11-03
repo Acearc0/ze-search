@@ -307,10 +307,10 @@ pub fn run() {
                     use windows::Win32::UI::WindowsAndMessaging::{
                         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
                     };
-                    let _mutex = CreateMutexW(None, false, w!("Global\\ZError_SingleInstance"));
+                    let _mutex = CreateMutexW(None, false, w!("Global\\ZErrorSearch_SingleInstance"));
                     let err = GetLastError();
                     if err.0 == ERROR_ALREADY_EXISTS.0 && !elevated_arg {
-                        let hwnd = FindWindowW(None, w!("ZError"));
+                        let hwnd = FindWindowW(None, w!("ZError Search"));
                         if hwnd.0 != 0 {
                             let _ = ShowWindow(hwnd, SW_RESTORE);
                             let _ = SetForegroundWindow(hwnd);
@@ -320,7 +320,7 @@ pub fn run() {
                 }
                 let username =
                     crate::database::get_username().unwrap_or_else(|_| "Administrator".to_string());
-                let base_dir = format!("C:\\Users\\{}\\AppData\\Local\\ZError", username);
+                let base_dir = format!("C:\\Users\\{}\\AppData\\Local\\ZErrorSearch", username);
                 let db_path = format!("{}\\airesponses.db", base_dir);
 
                 let mut need_elevation = false;

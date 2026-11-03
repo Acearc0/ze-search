@@ -10,7 +10,11 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "title": "ZError Search"
+      }
+    ],
     "security": {
       "csp": null,
       "capabilities": [

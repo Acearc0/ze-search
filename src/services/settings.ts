@@ -89,7 +89,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   itemsPerPage: 20,
   showExplanation: true,
   network: {
-    serverPort: 3001,
+    // 分支默认端口改为 3101，避免与原版 ZError（3001）同时运行时冲突
+    serverPort: 3101,
     enableLanAccess: false,
     bindAddress: '127.0.0.1'
   },
