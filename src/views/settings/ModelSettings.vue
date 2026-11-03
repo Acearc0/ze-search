@@ -1301,6 +1301,10 @@ const fetchedModels = ref<Array<{ id: string; exists: boolean }>>([])
 const buildModelsEndpoints = (baseUrl: string) => {
   let b = baseUrl.trim().replace(/\/+$/, '')
   b = b.replace(/\/chat\/completions$/i, '')
+  // 阿里云百炼 Anthropic 端点（/apps/anthropic）无模型列表接口，改用其 OpenAI 兼容端点，同一 API Key 可用
+  if (/^https?:\/\/dashscope\.aliyuncs\.com\/apps\/anthropic/i.test(b)) {
+    return ['https://dashscope.aliyuncs.com/compatible-mode/v1/models']
+  }
   if (/\/v\d+[a-z]*$/i.test(b)) return [`${b}/models`]
   return [`${b}/v1/models`, `${b}/models`]
 }
