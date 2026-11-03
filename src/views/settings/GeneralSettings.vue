@@ -187,6 +187,20 @@
           @change="updateWebSearch({ searxngInstances: ($event.target as HTMLInputElement).value })" placeholder="https://searx.example.com" />
       </div>
     </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">测试联网搜索</h3>
+        <p class="setting-description">
+          使用当前配置发起一次测试搜索，验证引擎可用性。
+          <span v-if="webSearchTestText" :style="{ color: webSearchTestOk === null ? 'inherit' : (webSearchTestOk ? '#16a34a' : '#dc2626') }">{{ webSearchTestText }}</span>
+        </p>
+      </div>
+      <div class="setting-control">
+        <button class="folder-action-btn select-folder-btn" :disabled="webSearchTesting" @click="testWebSearch">
+          {{ webSearchTesting ? '测试中…' : '测试' }}
+        </button>
+      </div>
+    </div>
     </div>
 
     <div class="network-group">
@@ -369,6 +383,34 @@ type WebSearchEngine = import('../../services/webSearch').SearchEngine
 const updateWebSearch = (patch: Partial<import('../../services/webSearch').WebSearchSettings>) => {
   settings.value.webSearch = { ...settings.value.webSearch, ...patch }
   setSetting('webSearch', settings.value.webSearch)
+}
+
+// 联网搜索测试：用当前配置发起一次真实搜索并显示结果/耗时
+const webSearchTesting = ref(false)
+const webSearchTestText = ref('')
+const webSearchTestOk = ref<boolean | null>(null)
+const testWebSearch = async () => {
+  webSearchTesting.value = true
+  webSearchTestText.value = ''
+  webSearchTestOk.value = null
+  const startedAt = Date.now()
+  try {
+    const { webSearch } = await import('../../services/webSearch')
+    const resp = await webSearch('OpenAI 最新模型', settings.value.webSearch)
+    const ms = Date.now() - startedAt
+    if (resp.sources.length > 0) {
+      webSearchTestOk.value = true
+      webSearchTestText.value = `✓ 引擎 ${resp.engine} 返回 ${resp.sources.length} 条结果，耗时 ${ms}ms${resp.fallbackNote ? `（${resp.fallbackNote}）` : ''}`
+    } else {
+      webSearchTestOk.value = false
+      webSearchTestText.value = `✗ 引擎 ${resp.engine} 未返回任何结果`
+    }
+  } catch (e: any) {
+    webSearchTestOk.value = false
+    webSearchTestText.value = `✗ ${e?.message || String(e)}`
+  } finally {
+    webSearchTesting.value = false
+  }
 }
 
 const openLanAccessDocs = async () => {
