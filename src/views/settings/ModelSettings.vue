@@ -1296,9 +1296,13 @@ const fetchModelsLoading = ref(false)
 const showFetchModelsDialog = ref(false)
 const fetchedModels = ref<Array<{ id: string; exists: boolean }>>([])
 
-const normalizeModelsEndpoint = (baseUrl: string) => {
-  const b = baseUrl.trim().replace(/\/+$/, '')
-  return /\/v1$/i.test(b) ? `${b}/models` : `${b}/v1/models`
+// 兼容各家供应商的 Base URL 写法：剥离误填的 /chat/completions 后缀，
+// 已带版本段（/v1、/v1beta…）时直接拼 /models，否则依次尝试 /v1/models 和 /models
+const buildModelsEndpoints = (baseUrl: string) => {
+  let b = baseUrl.trim().replace(/\/+$/, '')
+  b = b.replace(/\/chat\/completions$/i, '')
+  if (/\/v\d+[a-z]*$/i.test(b)) return [`${b}/models`]
+  return [`${b}/v1/models`, `${b}/models`]
 }
 
 const fetchModelsFromPlatform = async () => {
@@ -1307,12 +1311,23 @@ const fetchModelsFromPlatform = async () => {
   fetchModelsLoading.value = true
   try {
     const { fetch } = await import('@tauri-apps/plugin-http')
-    const endpoint = normalizeModelsEndpoint(platform.baseUrl)
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (platform.apiKey) headers['Authorization'] = `Bearer ${platform.apiKey}`
-    const resp = await fetch(endpoint, { method: 'GET', headers })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data: any = await resp.json()
+    let data: any = null
+    let lastStatus = 0
+    for (const endpoint of buildModelsEndpoints(platform.baseUrl)) {
+      const resp = await fetch(endpoint, { method: 'GET', headers })
+      lastStatus = resp.status
+      if (resp.status === 404) continue // 该路径不存在，尝试下一个候选端点
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      data = await resp.json()
+      break
+    }
+    if (!data) {
+      throw new Error(lastStatus === 404
+        ? '该供应商不支持模型列表接口（HTTP 404），请手动添加模型'
+        : `HTTP ${lastStatus}`)
+    }
     const list: any[] = Array.isArray(data?.data) ? data.data : []
     const ids = list.map(m => String(m?.id ?? '')).filter(Boolean).sort((a, b) => a.localeCompare(b))
     if (ids.length === 0) throw new Error('接口未返回任何模型')
