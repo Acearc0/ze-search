@@ -117,6 +117,79 @@
     </div>
 
     <div class="network-group">
+      <div class="group-title">联网搜索</div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">启用联网搜索</h3>
+        <p class="setting-description">开启后，模型可在不确定答案时调用 web_search 工具联网查证（免费引擎，无需 API Key）。关闭时不产生任何额外网络请求。</p>
+      </div>
+      <div class="setting-control">
+        <Toggle v-model="settings.webSearch.enabled" variant="default" size="medium"
+          @change="updateWebSearch({ enabled: $event })" />
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">搜索引擎</h3>
+        <p class="setting-description">首选引擎；失败时自动回退到其他免费引擎。</p>
+      </div>
+      <div class="setting-control">
+        <select class="form-input" :value="settings.webSearch.engine"
+          @change="updateWebSearch({ engine: ($event.target as HTMLSelectElement).value as WebSearchEngine })">
+          <option value="bing">Bing（推荐，最稳定）</option>
+          <option value="ddg">DuckDuckGo HTML</option>
+          <option value="ddg-lite">DuckDuckGo Lite</option>
+          <option value="searxng">SearXNG 元搜索</option>
+          <option value="anysearch">AnySearch</option>
+          <option value="tavily">Tavily</option>
+        </select>
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">Tavily API Key</h3>
+        <p class="setting-description">仅选择 Tavily 引擎时需要；留空走 Tavily 匿名额度。Key 仅保存在本地配置。</p>
+      </div>
+      <div class="setting-control">
+        <input type="password" class="form-input" :value="settings.webSearch.apiKey"
+          @change="updateWebSearch({ apiKey: ($event.target as HTMLInputElement).value })" placeholder="tvly-...（可选）" />
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">最大结果数</h3>
+        <p class="setting-description">每次搜索返回给模型的来源条数上限。</p>
+      </div>
+      <div class="setting-control timeout-control">
+        <input type="number" class="form-input" :value="settings.webSearch.maxResults" min="1" max="10" step="1"
+          @change="updateWebSearch({ maxResults: Math.max(1, Math.min(10, Number(($event.target as HTMLInputElement).value) || 5)) })" />
+        <span class="timeout-unit">条</span>
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">搜索超时</h3>
+        <p class="setting-description">单次搜索请求的超时时间（秒）。</p>
+      </div>
+      <div class="setting-control timeout-control">
+        <input type="number" class="form-input" :value="settings.webSearch.timeoutSeconds" min="3" max="60" step="1"
+          @change="updateWebSearch({ timeoutSeconds: Math.max(3, Math.min(60, Number(($event.target as HTMLInputElement).value) || 12)) })" />
+        <span class="timeout-unit">秒</span>
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">SearXNG 实例列表</h3>
+        <p class="setting-description">可选，自建/信任的 SearXNG 实例 URL（逗号分隔）；留空使用内置公网实例池。</p>
+      </div>
+      <div class="setting-control">
+        <input type="text" class="form-input" :value="settings.webSearch.searxngInstances"
+          @change="updateWebSearch({ searxngInstances: ($event.target as HTMLInputElement).value })" placeholder="https://searx.example.com" />
+      </div>
+    </div>
+    </div>
+
+    <div class="network-group">
       <div class="group-title">网络设置</div>
     <div class="setting-item">
       <div class="setting-info">
@@ -289,6 +362,13 @@ const handleFolderConfirm = async (folderId: number, folderName: string, folderP
 
 const handleNetworkChange = () => {
   settings.value.network.bindAddress = settings.value.network.enableLanAccess ? '0.0.0.0' : '127.0.0.1'
+}
+
+// 联网搜索设置：嵌套对象合并后整体写回（与 network 的存储方式一致）
+type WebSearchEngine = import('../../services/webSearch').SearchEngine
+const updateWebSearch = (patch: Partial<import('../../services/webSearch').WebSearchSettings>) => {
+  settings.value.webSearch = { ...settings.value.webSearch, ...patch }
+  setSetting('webSearch', settings.value.webSearch)
 }
 
 const openLanAccessDocs = async () => {

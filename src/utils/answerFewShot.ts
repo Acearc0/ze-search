@@ -1,3 +1,5 @@
+import { useSettings } from '../services/settings'
+
 export type AnswerFewShotKind = 'single' | 'multiple' | 'judgement' | 'completion' | 'general'
 
 type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -8,6 +10,9 @@ const SYSTEM_RULES = `你是专业答题助手。最终只输出一行 JSON：{"
 选择题 answer 必须是选项正文（与选项原文去掉 A./B. 后一致），禁止写 A/B/C/D，禁止写「B. 传动角」这种带字母前缀的形式。
 判断题 answer 只能是「正确」或「错误」。
 多选题多个答案用 ### 连接；填空题多空也用 ### 连接。`
+
+/** 联网搜索开启时追加到 system 规则的搜索引导（仅在 webSearch.enabled 时注入） */
+const SEARCH_GUIDANCE = `当题目涉及时效性信息、你不确定答案、或需要查证事实时，先调用 web_search 工具（参数 query 为题目核心关键词，去掉选项文本与题号），拿到搜索结果后再按上述规则输出答案 JSON；若答案依据了搜索结果，在 answer 正文末尾追加来源，格式：（来源: 1. https://... 2. https://...）。未调用工具或工具失败时直接凭自身知识作答。`
 
 const SINGLE_SHOTS: FewShotPair[] = [
   {
@@ -132,7 +137,10 @@ export const buildAnswerChatMessages = (query: string): ChatMessage[] => {
 
   const kind = detectAnswerFewShotKind(query)
   const shots = shotsForKind(kind)
-  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_RULES }]
+  // 联网搜索开启时，在 system 规则中追加搜索引导；关闭时与现状完全一致
+  const searchEnabled = useSettings().settings.webSearch?.enabled === true
+  const systemContent = searchEnabled ? `${SYSTEM_RULES}\n${SEARCH_GUIDANCE}` : SYSTEM_RULES
+  const messages: ChatMessage[] = [{ role: 'system', content: systemContent }]
 
   for (const shot of shots) {
     messages.push({ role: 'user', content: shot.user })

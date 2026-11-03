@@ -1,5 +1,6 @@
 import { reactive, watch } from 'vue'
 import { environmentDetector } from './environmentDetector'
+import type { WebSearchSettings } from './webSearch'
 
 // 设置接口定义
 export interface AppSettings {
@@ -14,6 +15,9 @@ export interface AppSettings {
   modelResponseTimeout: number
   // 模型失败自动重试次数（仅单模型 / 总结模型 / 视觉模型）；0 表示不重试
   modelRetryCount: number
+
+  // 联网搜索设置（默认关闭；开启后向模型注入 web_search 工具）
+  webSearch: WebSearchSettings
 
   
   // 题目显示设置
@@ -72,12 +76,20 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoAddToQuestionBank: true,
   modelResponseTimeout: 40,
   modelRetryCount: 2,
+  webSearch: {
+    enabled: false,
+    engine: 'bing',
+    apiKey: '',
+    maxResults: 5,
+    timeoutSeconds: 12,
+    searxngInstances: ''
+  },
 
   defaultDifficulty: 'medium',
   itemsPerPage: 20,
   showExplanation: true,
   network: {
-    serverPort: 3000,
+    serverPort: 3001,
     enableLanAccess: false,
     bindAddress: '127.0.0.1'
   },
@@ -129,7 +141,7 @@ class SettingsManager {
       if (stored) {
         const parsedSettings = { ...(JSON.parse(stored) || {}) }
         delete parsedSettings.enableNonThinkingModelAnalysis
-        return { ...DEFAULT_SETTINGS, ...parsedSettings, network: { ...DEFAULT_SETTINGS.network, ...(parsedSettings.network || {}) } }
+        return { ...DEFAULT_SETTINGS, ...parsedSettings, network: { ...DEFAULT_SETTINGS.network, ...(parsedSettings.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsedSettings.webSearch || {}) } }
       }
 
 
@@ -150,7 +162,7 @@ class SettingsManager {
       if (content) {
         const parsed = { ...(JSON.parse(content) || {}) }
         delete parsed.enableNonThinkingModelAnalysis
-        Object.assign(this.settings, { ...DEFAULT_SETTINGS, ...parsed, network: { ...DEFAULT_SETTINGS.network, ...(parsed.network || {}) } })
+        Object.assign(this.settings, { ...DEFAULT_SETTINGS, ...parsed, network: { ...DEFAULT_SETTINGS.network, ...(parsed.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsed.webSearch || {}) } })
         console.log('已从配置文件加载设置')
       }
 
@@ -342,6 +354,7 @@ class SettingsManager {
       autoAddToQuestionBank: '自动将AI返回的题目添加到本地题库',
       modelResponseTimeout: '文本模型最长响应时间（秒）',
       modelRetryCount: '模型失败自动重试次数',
+      webSearch: '联网搜索配置（默认关闭）',
 
       network: '网络配置设置',
       windowSize: '窗口大小',

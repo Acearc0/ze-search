@@ -518,6 +518,7 @@ import { useSettings } from '../services/settings'
 import { useModelConfig } from '../services/modelConfig'
 import type { AIModel } from '../services/modelConfig'
 import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../services/modelProtocol'
+import { WEB_SEARCH_TOOL, executeWebSearchToolCall } from '../services/webSearch'
 import { databaseService } from '../services/database'
 
 import PortConfigDialog from './home/PortConfigDialog.vue'
@@ -2065,6 +2066,12 @@ const callModelWithStreaming = async (
   const { settings: appSettings } = useSettings()
   const timeoutMs = (appSettings.modelResponseTimeout ?? 40) * 1000
 
+  // 联网搜索：仅在用户显式开启时注入 web_search 工具；关闭时 tools 保持 []，代码路径与现状完全一致
+  const webSearchCfg = appSettings.webSearch
+  if (webSearchCfg?.enabled) {
+    testInput.tools = [WEB_SEARCH_TOOL]
+  }
+
   // AbortController 用于超时中断 fetch
   const abortController = new AbortController()
   registerAbortController(requestId, abortController)
@@ -2116,6 +2123,7 @@ const callModelWithStreaming = async (
       let fullResponse = ''
       let fullReasoning = ''
       let lastProgressSentAt = 0
+      let toolRounds = 0
 
       // 立即心跳，避免后台启动时 60s 内无任何 progress → 408
       void sendModelProgressToBackend(requestId, 'started')
@@ -2171,32 +2179,30 @@ const callModelWithStreaming = async (
             }
 
             if (toolCalls.length > 0) {
+              toolRounds++
               testInput.messages.push({ role: 'assistant', content: '', tool_calls: toolCalls })
 
               for (const tc of toolCalls) {
                 try {
-                  fullResponse += `\n\n[正在调用工具: ${tc.function.name}...]\n`
-                  if (onChunk) onChunk(fullResponse)
-                  else updateStreamingResponse(requestId, fullResponse)
-
+                  // 工具结果只回传给模型，不拼入 fullResponse（保持答案 JSON 干净）
                   let toolResult = ''
-                  toolResult = `Error: Unknown function ${tc.function.name}`
-
-                  fullResponse += `[工具返回: ${toolResult}]\n\n`
-                  if (onChunk) onChunk(fullResponse)
-                  else updateStreamingResponse(requestId, fullResponse)
-
+                  if (tc.function.name === 'web_search' && webSearchCfg?.enabled) {
+                    toolResult = await executeWebSearchToolCall(tc.function.arguments, webSearchCfg, abortController.signal)
+                    console.info(`🌐 联网搜索已执行 (requestId=${requestId}, 第 ${toolRounds} 轮)`)
+                  } else {
+                    toolResult = `Error: Unknown function ${tc.function.name}`
+                  }
                   testInput.messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: toolResult })
                 } catch (e: any) {
+                  if (isRequestCancelled(requestId) || isAbortLikeError(e)) throw e
                   const errStr = `Error: ${e.message || String(e)}`
-                  fullResponse += `[工具执行失败: ${errStr}]\n\n`
-                  if (onChunk) onChunk(fullResponse)
-                  else updateStreamingResponse(requestId, fullResponse)
-
                   testInput.messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: errStr })
                 }
               }
-              
+
+              // 限制工具轮数：达到上限后移除工具，强制模型直接给出最终答案
+              if (toolRounds >= 3) testInput.tools = []
+
               // tool calls processed, loop again
               continue;
             }

@@ -363,7 +363,15 @@ async function startAutoDownload(force = false) {
   return downloadPromise
 }
 
+// ZError Search 分支：禁用官方更新检查，避免安装包被官方版本覆盖
+const FORK_DISABLE_UPDATES = true
+
 async function checkForUpdates(options?: { forceDialog?: boolean }) {
+  if (FORK_DISABLE_UPDATES) {
+    status.value = 'idle'
+    return
+  }
+
   if (checkPromise && !options?.forceDialog) {
     return checkPromise
   }
