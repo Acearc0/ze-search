@@ -473,11 +473,29 @@ export function formatSearchResultsForModel(resp: SearchResponse): string {
  */
 export async function executeWebSearchToolCall(argsJson: string, cfg: WebSearchSettings, signal?: AbortSignal): Promise<string> {
   let query = ''
+  let parseFailed = false
   try {
     const parsed = JSON.parse(argsJson || '{}')
     query = String(parsed.query ?? '').trim()
   } catch {
-    return 'Error: invalid tool arguments (expect {"query": "..."})'
+    parseFailed = true
+  }
+  // 兜底：流式分片拼接异常（片段重复、截断）时，直接从原始参数里提取 query 值
+  if (!query && argsJson) {
+    const m = /"query"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(argsJson)
+    if (m) {
+      try {
+        query = (JSON.parse(`"${m[1]}"`) as string).trim()
+      } catch {
+        query = m[1].trim()
+      }
+    }
+  }
+  // 模型有时只发出空参数或半个 JSON：给出明确指引让它重试，而不是用空关键词去搜索
+  if (!query) {
+    return parseFailed
+      ? 'Error: invalid tool arguments (expect {"query": "..."}). 请重新调用 web_search 并通过 JSON 参数传入 query 字段。'
+      : 'Error: missing "query" argument. 请重新调用 web_search，参数格式为 {"query": "题目核心关键词"}。'
   }
   try {
     const resp = await webSearch(query, cfg, signal)

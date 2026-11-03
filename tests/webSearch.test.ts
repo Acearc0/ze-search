@@ -115,6 +115,14 @@ test('executeWebSearchToolCall：非法参数返回错误文本', async () => {
   assert.ok(out.startsWith('Error: invalid tool arguments'))
 })
 
+test('executeWebSearchToolCall：参数残缺/重复时仍能提取 query 执行搜索', async () => {
+  const body = '<li class="b_algo"><h2><a href="https://example.com/a">标题</a></h2></li>'
+  installFetch(async () => mockResponse(200, body, 'text/html'))
+  // 模拟流式分片拼接失败：JSON 重复了一次
+  const out = await executeWebSearchToolCall('{"query":"测试题目"}{"query":"测试题目"}', baseCfg())
+  assert.ok(!out.startsWith('Error:'), `应能提取 query，实际: ${out.slice(0, 60)}`)
+})
+
 test('executeWebSearchToolCall：搜索失败不抛错，返回提示模型凭知识作答', async () => {
   installFetch(async () => { throw new Error('network down') })
   const out = await executeWebSearchToolCall('{"query":"测试题目"}', baseCfg({ engine: 'tavily' }))

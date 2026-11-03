@@ -2152,17 +2152,35 @@ const callModelWithStreaming = async (
           // 如果返回的是生成器或异步迭代器，进行流式处理
           if (result[Symbol.asyncIterator]) {
             let toolCalls: any[] = []
+            // OpenAI 流式分片的 tool_calls 只有首片带 id/name，后续片仅带 index + arguments 片段，
+            // 因此按 index 归并；缺失 id 时兜底生成，避免拼接出半截 JSON 导致「invalid tool arguments」
+            const toolCallSlots = new Map<string, any>()
 
             for await (const chunk of result) {
               if (chunk.tool_calls) {
                 for (const tc of chunk.tool_calls) {
-                  const existing = toolCalls.find(t => t.id === tc.id)
-                  if (existing) {
-                    existing.function.arguments += (tc.function?.arguments || '')
-                  } else {
-                    toolCalls.push(tc)
+                  const key = tc.index !== undefined && tc.index !== null
+                    ? `idx:${tc.index}`
+                    : tc.id
+                      ? `id:${tc.id}`
+                      : `any:${toolCallSlots.size}`
+                  let slot = toolCallSlots.get(key)
+                  if (!slot) {
+                    slot = {
+                      id: tc.id || '',
+                      type: 'function',
+                      function: { name: tc.function?.name || '', arguments: '' }
+                    }
+                    toolCallSlots.set(key, slot)
                   }
+                  if (tc.id) slot.id = tc.id
+                  if (tc.function?.name) slot.function.name = tc.function.name
+                  if (tc.function?.arguments) slot.function.arguments += tc.function.arguments
                 }
+                toolCalls = Array.from(toolCallSlots.values()).map((slot, i) => ({
+                  ...slot,
+                  id: slot.id || `call_${requestId}_${i}`
+                }))
               }
               if (chunk.content) {
                 fullResponse += chunk.content
