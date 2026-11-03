@@ -228,6 +228,17 @@
                   <path d="M544.256 480.256h307.2a32.256 32.256 0 0 1 0 64h-307.2v307.2a32.256 32.256 0 0 1-64 0v-307.2h-307.2a32.256 32.256 0 1 1 0-64h307.2v-307.2a32.256 32.256 0 1 1 64 0z" fill="currentColor"/>
                 </svg>
               </button>
+              <!-- 自动拉取模型按钮 -->
+              <button
+                class="icon-action-btn icon-action-btn--add"
+                :disabled="fetchModelsLoading || !selectedPlatform?.baseUrl"
+                @click="fetchModelsFromPlatform"
+                title="从供应商接口自动拉取模型列表（GET {Base URL}/v1/models）"
+              >
+                <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+                  <path d="M192 384a32 32 0 0 1 32 32v288a64 64 0 0 0 64 64h448a64 64 0 0 0 64-64V416a32 32 0 1 1 64 0v288a128 128 0 0 1-128 128H288a128 128 0 0 1-128-128V416a32 32 0 0 1 32-32zm320-288a32 32 0 0 1 32 32v329.4l100.7-100.7a32 32 0 0 1 45.2 45.2L534.6 557.2a32 32 0 0 1-45.2 0L334.1 401.9a32 32 0 0 1 45.2-45.2L480 457.4V128a32 32 0 0 1 32-32z" fill="currentColor"/>
+                </svg>
+              </button>
             </div>
           </div>
           
@@ -363,6 +374,14 @@
       @confirm="confirmDeletePlatform"
       @cancel="cancelDeletePlatform"
     />
+
+    <!-- 拉取模型弹窗 -->
+    <FetchModelsDialog
+      :visible="showFetchModelsDialog"
+      :items="fetchedModels"
+      @confirm="addFetchedModels"
+      @cancel="showFetchModelsDialog = false"
+    />
   </div>
 
 </template>
@@ -378,6 +397,7 @@ import PlatformConfigDialog from './ModelSettings/PlatformConfigDialog.vue'
 import PlatformContextMenu from './ModelSettings/PlatformContextMenu.vue'
 import ModelContextMenu from './ModelSettings/ModelContextMenu.vue'
 import ModelConfigDialog from './ModelSettings/ModelConfigDialog.vue'
+import FetchModelsDialog from './ModelSettings/FetchModelsDialog.vue'
 import ModelTestDialog from './ModelSettings/ModelTestDialog.vue'
 import ModelDeleteConfirmDialog from './ModelSettings/ModelDeleteConfirmDialog.vue'
 import PlatformDeleteConfirmDialog from './ModelSettings/PlatformDeleteConfirmDialog.vue'
@@ -1268,6 +1288,73 @@ const saveModel = async (modelData: Partial<AIModel>) => {
   } catch (error) {
     console.error('保存模型失败:', error)
     alert('保存失败，请检查模型配置')
+  }
+}
+
+// ===== 自动拉取模型列表（GET {baseUrl}/v1/models，OpenAI 兼容格式） =====
+const fetchModelsLoading = ref(false)
+const showFetchModelsDialog = ref(false)
+const fetchedModels = ref<Array<{ id: string; exists: boolean }>>([])
+
+const normalizeModelsEndpoint = (baseUrl: string) => {
+  const b = baseUrl.trim().replace(/\/+$/, '')
+  return /\/v1$/i.test(b) ? `${b}/models` : `${b}/v1/models`
+}
+
+const fetchModelsFromPlatform = async () => {
+  const platform = selectedPlatform.value
+  if (!platform || !platform.baseUrl) return
+  fetchModelsLoading.value = true
+  try {
+    const { fetch } = await import('@tauri-apps/plugin-http')
+    const endpoint = normalizeModelsEndpoint(platform.baseUrl)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (platform.apiKey) headers['Authorization'] = `Bearer ${platform.apiKey}`
+    const resp = await fetch(endpoint, { method: 'GET', headers })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data: any = await resp.json()
+    const list: any[] = Array.isArray(data?.data) ? data.data : []
+    const ids = list.map(m => String(m?.id ?? '')).filter(Boolean).sort((a, b) => a.localeCompare(b))
+    if (ids.length === 0) throw new Error('接口未返回任何模型')
+    fetchedModels.value = ids.map(id => ({
+      id,
+      exists: platform.models.some(m => (m.modelId || m.name) === id)
+    }))
+    showFetchModelsDialog.value = true
+  } catch (e: any) {
+    console.error('拉取模型列表失败:', e)
+    alert(`拉取失败：${e?.message || e}`)
+  } finally {
+    fetchModelsLoading.value = false
+  }
+}
+
+const addFetchedModels = async (ids: string[]) => {
+  const platform = selectedPlatform.value
+  if (!platform) return
+  const platformId = platform.id
+  let lastId: string | null = null
+  for (const id of ids) {
+    lastId = await addModelToPlatform(platformId, {
+      name: id,
+      displayName: id,
+      maxTokens: 4096,
+      temperature: 0.7,
+      topP: 1.0,
+      enabled: true,
+      modelId: id,
+      jsCode: '',
+      category: 'text',
+      enableThinking: false,
+      thinkingOffEnableThinkingFalse: true,
+      thinkingOffThinkingTypeDisabled: false,
+      thinkingOffResponsesEffort: 'minimal',
+      thinkingEffort: 'medium'
+    })
+  }
+  showFetchModelsDialog.value = false
+  if (lastId) {
+    await revealModelInList(platformId, lastId, 'text')
   }
 }
 
