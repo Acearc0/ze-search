@@ -89,6 +89,17 @@
       </div>
     </div>
 
+    <!-- 自定义问题（自由问答，不走题库/OCS，联网搜索开关同样生效） -->
+    <div class="custom-question-card">
+      <input v-model="customQuestionText" class="custom-question-input" type="text"
+        placeholder="输入任意问题，回车直接提问（使用当前选中模型）" @keydown.enter="submitCustomQuestion"
+        :disabled="customQuestionSubmitting" />
+      <button class="custom-question-btn" @click="submitCustomQuestion"
+        :disabled="customQuestionSubmitting || !customQuestionText.trim()">
+        {{ customQuestionSubmitting ? '回答中…' : '提问' }}
+      </button>
+    </div>
+
     <!-- 请求记录区域 -->
     <div class="request-logs-layout">
       <!-- 请求记录列表 -->
@@ -2552,6 +2563,80 @@ const callSingleModelAPI = async (model: AIModel, query: string, logId: string):
   }
 }
 
+// 自定义问题：自由问答入口，不经过题库/OCS，复用当前选中模型与联网搜索链路
+const customQuestionText = ref('')
+const customQuestionSubmitting = ref(false)
+
+const submitCustomQuestion = async () => {
+  const text = customQuestionText.value.trim()
+  if (!text || customQuestionSubmitting.value) return
+  const model = currentModel.value || globalSelectedTextModels.value[0]
+  if (!model) {
+    alert('请先选择一个模型')
+    return
+  }
+
+  const logId = Date.now().toString() + Math.random().toString(36).substr(2, 9)
+  const platform = platforms.value.find(p => p.models.some(m => m.id === model.id))
+  requestLogs.value.unshift({
+    id: logId,
+    timestamp: Date.now(),
+    method: 'CUSTOM',
+    path: '/custom-query',
+    status: undefined,
+    ip: '本地',
+    userAgent: '自定义问题',
+    responseTime: undefined,
+    requestBody: JSON.stringify({ title: text }),
+    responseBody: undefined,
+    headers: {},
+    stage: 'started',
+    isModelCalling: true,
+    modelResponse: '',
+    streamingReasoning: '',
+    reasoningContent: '',
+    modelInfo: platform
+      ? { platformName: platform.displayName, modelName: model.displayName, modelId: model.id }
+      : undefined
+  } as RequestLog)
+  trimRequestLogs()
+  customQuestionText.value = ''
+  customQuestionSubmitting.value = true
+
+  const patchLog = (fn: (log: RequestLog) => void) => {
+    const log = requestLogs.value.find(l => l.id === logId)
+    if (log) fn(log)
+  }
+
+  try {
+    const response = await withModelRetry(logId, model.displayName, true, async () =>
+      callModelWithStreaming(model, text, logId,
+        (content) => patchLog(log => { log.modelResponse = stripMarkdownCodeBlock(content) }),
+        (reasoning) => patchLog(log => { log.streamingReasoning = reasoning }))
+    )
+    patchLog(log => {
+      log.modelResponse = stripMarkdownCodeBlock(response)
+      log.isModelCalling = false
+    })
+    applyLocalRequestCompletion(logId, 200, JSON.stringify({ code: 1, message: response }))
+  } catch (error) {
+    const errText = (isAbortLikeError(error) || isRequestCancelled(logId))
+      ? MODEL_REQUEST_CANCELLED_MESSAGE
+      : `错误: ${formatModelCallError(error)}`
+    patchLog(log => {
+      log.modelResponse = errText
+      log.isModelCalling = false
+    })
+    applyLocalRequestCompletion(
+      logId,
+      isTimeoutLikeModelFailureText(errText) ? 408 : 500,
+      JSON.stringify({ code: 0, message: errText })
+    )
+  } finally {
+    customQuestionSubmitting.value = false
+  }
+}
+
 // 调用模型API（支持多模型并发）
 /** 按 requestId+阶段去重，避免 SSE/Tauri 双通道重复；同题判断与正式答题可相继执行 */
 const inflightModelCallKeys = new Set<string>()
@@ -4451,6 +4536,50 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+.custom-question-card {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.custom-question-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.custom-question-input:focus {
+  border-color: var(--server-toggle-bg);
+}
+
+.custom-question-input:disabled {
+  opacity: 0.6;
+}
+
+.custom-question-btn {
+  padding: 0 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--server-toggle-bg);
+  color: var(--server-toggle-text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.custom-question-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .server-toggle-btn {
