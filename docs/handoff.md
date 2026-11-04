@@ -6,7 +6,7 @@
 
 ## 一、项目概览
 
-ZError 是一款基于 Tauri 2 架构的本地 AI 题库软件，专为 OCS 网课助手设计。本 fork 在原版基础上增加了**联网搜索**、**模型自动拉取**、**多模型懒投票**等功能，并做了与原版**共存运行**的改造（独立进程名/数据目录/端口/互斥锁）。
+ZError 是一款基于 Tauri 2 架构的本地 AI 题库软件，专为 OCS 网课助手设计。本 fork 在原版基础上增加了**联网搜索**、**模型自动拉取**、**多模型懒投票**等功能，做了与原版**共存运行**的改造（独立进程名/数据目录/端口/互斥锁），并**移除了对原作者服务器的远程模型目录、版本检查与自动更新依赖**（详见 3.8 节）。
 
 - **前端**：Vue 3 + TypeScript + Vite
 - **后端**：Rust（Tauri 2），仅负责窗口、文件系统、HTTP 代理、数据库、本地 OCS 服务等
@@ -19,7 +19,7 @@ ZError 是一款基于 Tauri 2 架构的本地 AI 题库软件，专为 OCS 网�
 | 层 | 职责 | 关键文件 |
 |---|---|---|
 | Rust 后端 | 窗口管理、OCS 本地服务、SQLite 题库、文件系统、HTTP 代理（`plugin-http`） | `src-tauri/src/*.rs` |
-| 前端状态 | 模型配置、应用设置、主题、更新 | `src/services/modelConfig.ts`、`src/services/settings.ts` |
+| 前端状态 | 模型配置、应用设置、主题 | `src/services/modelConfig.ts`、`src/services/settings.ts` |
 | 前端 LLM | 模型调用、流式解析、工具循环、搜索 | `src/views/Home.vue`、`src/services/modelProtocol.ts`、`src/services/webSearch.ts` |
 | 前端 UI | 首页答题、题库、设置 | `src/views/*.vue` |
 
@@ -51,7 +51,6 @@ LLM 调用链全部在前端，核心是 `modelProtocol.ts`：
 
 ### 3.2 与原版共存
 - 独立进程名/数据目录/端口/互斥锁，可与原版 ZError 同时运行
-- 独立更新密钥（`src-tauri/keys/zerror.key`）
 
 ### 3.3 模型自动拉取
 - 设置 → 模型管理 → 平台右键「拉取模型」，调用平台 `/models` 接口
@@ -76,8 +75,32 @@ LLM 调用链全部在前端，核心是 `modelProtocol.ts`：
 - 首页支持输入自定义问题直接问答，不走题库
 
 ### 3.7 模型管理增强
-- 远程/默认模型可删除（右键菜单），删除后记入 `deletedRemoteModels`，同步时不会恢复
+- 远程/默认模型可删除（右键菜单），删除后记入 `deletedRemoteModels`
 - 加载时自动按 `modelId` 去重（优先保留远程模型）
+
+### 3.8 去外部依赖化（重要）
+本 fork 已**彻底移除**对原作者服务器 `zaizhexue.top` 的以下依赖：
+
+| 移除项 | 原用途 | 现在的行为 |
+|---|---|---|
+| 远程模型目录 `live/models.json` | 启动下发预设平台/模型 | 不再自动出现预设平台，全部由用户手动添加或「拉取模型」 |
+| 版本检查 `live/latest_version.json` | 检测新版本弹窗 | 已删除 `versionCheck.ts` / `useAppUpdate.ts` / `UpdateDialog.vue` |
+| Tauri 自动更新 `live/update.json` | 在线下载安装包 | 已移除 `tauri-plugin-updater` 依赖与 `tauri.conf.json` updater 配置 |
+
+- 升级方式改为：到 GitHub Actions 手动下载新安装包覆盖安装
+- 关于页版本号通过 `@tauri-apps/api/app` 的 `getVersion()` 动态获取
+- Rust 侧同步清理：`can_native_updater_install` 命令、macOS TMPDIR 对齐逻辑（`ensure_tmpdir_same_volume_as_exe`）均已删除
+- **仍保留**的唯一 `zaizhexue.top` 请求：平台图标 `providers/*.png`（静态图片下载，不传输用户数据；加载失败仅显示空白，不影响功能）
+
+### 3.9 当前对外网络接口一览
+| 接口 | 地址来源 | 触发条件 |
+|---|---|---|
+| LLM 调用 | 用户配置的 Base URL | 答题/总结时 |
+| 拉取模型列表 | 用户配置的 Base URL `/models` | 用户点击「拉取模型」 |
+| 联网搜索 | bing/ddg/searxng 等 | 设置中开启且模型调用 `web_search` 工具 |
+| 平台图标 | `zaizhexue.top/providers/` | 设置页展示平台图标时（唯一硬编码外部域名） |
+
+除以上外无任何遥测/上报/后台请求。
 
 ## 四、关键文件速查
 
@@ -160,7 +183,22 @@ node --test tests/webSearch.test.ts  # 搜索单测，9/9 通过
 ## 八、后续维护建议
 
 1. **联网搜索质量**：引擎可能因反爬失效，关注 `webSearch.ts` 的回退链
-2. **远程模型目录**：`https://webapi.zaizhexue.top/live/models.json` 由上游维护，协议变化时需同步 `modelProtocol.ts`
+2. **平台图标**：`iconCache.ts` 仍硬编码 `zaizhexue.top/providers/`，如需彻底断链可改为本地图标或按平台名首字母渲染占位图标
 3. **多模型调度**：`Home.vue` 是最复杂的文件，改动时务必跑 `vue-tsc`
 4. **CI 构建时间**：可通过优化 cache 或拆分步骤缩短
 5. **共存**：若需进一步隔离，检查 `tauri.conf.json` 的 identifier、数据目录、端口配置
+6. **升级发布**：无自动更新，发新版需在 Actions 下载产物并通知用户手动覆盖安装
+
+## 九、提交历史要点（master）
+
+| 提交 | 内容 |
+|---|---|
+| `2584ec0` | 移除答案二次自检；拉取模型支持文本/视觉分类 |
+| `47967a6` | 拉取弹窗搜索框、字体统一、同模型兼任文本+视觉、懒投票 |
+| `963e67c` | 懒投票开关与第三模型（仲裁）移入通用设置 |
+| `d0eb2b5` | 版本感知 URL 拼接修复 404；拉取模型跟随平台协议 |
+| `f96254a` | 拉取模型按 modelId 去重；远程/默认模型可删除 |
+| `f15d5ab` | 拉取模型一律默认 openai-chat 协议 |
+| `97f2d21` | 移除远程模型目录、自动更新与版本检查（去外部依赖） |
+
+> 注：`97f2d21` 已提交本地，尚未推送（截至本文档撰写时）。
