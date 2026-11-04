@@ -85,6 +85,12 @@ const buildCommonHelpers = () => `
 
   const normalizeBaseUrl = (baseUrl) => String(baseUrl || '').replace(/\\/+$/, '');
 
+  // baseUrl 已带版本段（/v1、/v1beta 等）时直接拼端点路径，否则补 /v1 前缀（兼容两种 Base URL 写法）
+  const buildApiUrl = (baseUrl, path) => {
+    const base = normalizeBaseUrl(baseUrl);
+    return /\\/v\\d+[a-z]*$/i.test(base) ? base + path : base + '/v1' + path;
+  };
+
   // Chat：关 → enable_thinking / thinking.type；开 → reasoning_effort
   // Responses：关 → reasoning.effort none|minimal；开 → reasoning.effort
   // apiKind: 'chat' | 'responses'
@@ -475,7 +481,7 @@ ${injectTemplateHelpers(modelId, thinking)}
   if (typeof config.maxTokens === 'number') payload.max_tokens = config.maxTokens;
   applyOpenAIThinkingPayload(payload, 'chat');
 
-  const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/v1/chat/completions', {
+  const response = await fetch(buildApiUrl(config.baseUrl, '/chat/completions'), {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify(payload),
@@ -513,7 +519,7 @@ ${injectTemplateHelpers(modelId, thinking)}
   }
   applyOpenAIThinkingPayload(payload, 'responses');
 
-  const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/v1/responses', {
+  const response = await fetch(buildApiUrl(config.baseUrl, '/responses'), {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify(payload),
@@ -618,7 +624,7 @@ ${injectTemplateHelpers(modelId, thinking)}
     payload.thinking = { type: 'disabled' };
   }
 
-  const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/v1/messages', {
+  const response = await fetch(buildApiUrl(config.baseUrl, '/messages'), {
     method: 'POST',
     headers: buildHeaders({
       'anthropic-version': '2023-06-01'

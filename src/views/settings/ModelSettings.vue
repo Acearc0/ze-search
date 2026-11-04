@@ -1352,6 +1352,8 @@ const addFetchedModels = async (added: { id: string; category: 'text' | 'vision'
   const platform = selectedPlatform.value
   if (!platform) return
   const platformId = platform.id
+  // 拉取的模型跟随平台现有模型的 API 协议（如 Anthropic 端点拉取的模型也走 anthropic 协议）；custom 不继承
+  const siblingProtocol = platform.models.find(m => m.apiProtocol && m.apiProtocol !== 'custom')?.apiProtocol
   let lastId: string | null = null
   let lastCategory: 'text' | 'vision' = 'text'
   for (const item of added) {
@@ -1364,6 +1366,7 @@ const addFetchedModels = async (added: { id: string; category: 'text' | 'vision'
       enabled: true,
       modelId: item.id,
       jsCode: '',
+      apiProtocol: siblingProtocol,
       category: item.category,
       enableThinking: false,
       thinkingOffEnableThinkingFalse: true,
