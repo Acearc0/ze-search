@@ -1134,7 +1134,7 @@ const handleStartTest = async ({ testFunctionCalling }: { testFunctionCalling: b
 }
 
 const handleDeleteModel = async () => {
-  if (contextMenuModel.value && !contextMenuModel.value.isRemote) {
+  if (contextMenuModel.value) {
     deleteModelName.value = contextMenuModel.value.displayName || contextMenuModel.value.name
     deleteModelId.value = contextMenuModel.value.id
     showDeleteModelDialog.value = true

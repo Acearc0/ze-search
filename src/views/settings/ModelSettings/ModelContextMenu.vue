@@ -93,22 +93,20 @@ const menuItems = computed<MenuItem[]>(() => {
     })
   }
 
-  if (!isRemote) {
-    items.push(
-      { type: 'divider' },
-      {
-        id: 'delete-model',
-        label: '删除模型',
-        action: 'delete-model',
-        danger: true,
-        icon: {
-          type: 'svg',
-          polylines: [{ points: '3,6 5,6 21,6' }],
-          paths: [{ d: 'M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2' }]
-        }
+  items.push(
+    { type: 'divider' },
+    {
+      id: 'delete-model',
+      label: '删除模型',
+      action: 'delete-model',
+      danger: true,
+      icon: {
+        type: 'svg',
+        polylines: [{ points: '3,6 5,6 21,6' }],
+        paths: [{ d: 'M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2' }]
       }
-    )
-  }
+    }
+  )
 
   return items
 })

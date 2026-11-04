@@ -73,6 +73,8 @@ export interface ModelSettings {
   // 记录用户删除的预设平台和模型，用于后续启动不再恢复（已废弃，保留兼容）
   deletedPredefinedPlatforms?: string[]
   deletedPredefinedModels?: string[]
+  // 记录用户删除的远程模型 ID（按远程目录中的模型 id），同步时跳过，避免被恢复
+  deletedRemoteModels?: string[]
 }
 
 // 远程模型数据 URL（测试版 / 正式版统一）
@@ -238,6 +240,36 @@ const dedupeModelsById = (models: AIModel[]): AIModel[] => {
   return [...modelMap.values()]
 }
 
+// 按实际调用的 modelId 去重：同一平台上相同 modelId 的模型只保留一个
+// 优先级：远程模型 > 用户自定义过显示名的模型 > 第一个
+const dedupeByRuntimeModelId = (models: AIModel[]): AIModel[] => {
+  const groups = new Map<string, AIModel[]>()
+  for (const model of models) {
+    const key = (model.modelId || model.id || '').trim()
+    const gKey = key || `__noid__${model.id}`
+    const arr = groups.get(gKey) || []
+    arr.push(model)
+    groups.set(gKey, arr)
+  }
+  const result: AIModel[] = []
+  for (const arr of groups.values()) {
+    if (arr.length === 1) {
+      result.push(arr[0])
+      continue
+    }
+    const remote = arr.find(m => m.isRemote)
+    if (remote) {
+      result.push(remote)
+      continue
+    }
+    const customized = arr.find(
+      m => (m.displayName || '').trim() !== (m.modelId || '').trim()
+    )
+    result.push(customized || arr[0])
+  }
+  return result
+}
+
 const getPlatformApiKey = (platforms: AIPlatform[], preferredPlatform?: AIPlatform): string => {
   if (preferredPlatform?.apiKey?.trim()) {
     return preferredPlatform.apiKey
@@ -266,28 +298,30 @@ const sanitizeStoredPlatforms = (platforms: AIPlatform[]): AIPlatform[] => {
       ?? sameIdPlatforms.find(platform => isLikelyUserCreatedPlatform(platform))
       ?? sameIdPlatforms[0]
 
-    const models = dedupeModelsById(
-      sameIdPlatforms.flatMap(platform => (platform.models || [])
-        .filter((model): model is AIModel => !!model?.id)
-        .filter((model) => {
-          if (!hasRemoteDuplicate) return true
-          if (model.isRemote) return true
-          return isLikelyUserCreatedModel(model, platform.id)
-        })
-        .map(model => {
-          const nextModel: AIModel = {
-            ...model,
-            platformId: preferredPlatform.id,
-            isRemote: model.isRemote === true,
-          }
-          // 远程模型不再保留 jsCode
-          if (nextModel.isRemote) {
-            delete nextModel.jsCode
-          }
-          return nextModel
-        })
+    const models = dedupeByRuntimeModelId(
+      dedupeModelsById(
+        sameIdPlatforms.flatMap(platform => (platform.models || [])
+          .filter((model): model is AIModel => !!model?.id)
+          .filter((model) => {
+            if (!hasRemoteDuplicate) return true
+            if (model.isRemote) return true
+            return isLikelyUserCreatedModel(model, platform.id)
+          })
+          .map(model => {
+            const nextModel: AIModel = {
+              ...model,
+              platformId: preferredPlatform.id,
+              isRemote: model.isRemote === true,
+            }
+            // 远程模型不再保留 jsCode
+            if (nextModel.isRemote) {
+              delete nextModel.jsCode
+            }
+            return nextModel
+          })
       )
     )
+  )
 
     return {
       ...preferredPlatform,
@@ -374,7 +408,8 @@ const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     enableLogging: false
   },
   deletedPredefinedPlatforms: [],
-  deletedPredefinedModels: []
+  deletedPredefinedModels: [],
+  deletedRemoteModels: []
 }
 
 // 模型配置存储键
@@ -628,7 +663,10 @@ class ModelConfigManager {
         || this.findLocalPlatformWithSameRemoteModelId(rp)?.apiKey
         || ''
 
-      const remoteModels: AIModel[] = (rp.models || []).map(rm => {
+      const deletedRemoteModelIds = new Set(this.settings.deletedRemoteModels || [])
+      const remoteModels: AIModel[] = (rp.models || [])
+        .filter(rm => !deletedRemoteModelIds.has(rm.id))
+        .map(rm => {
         // 自动检测思考模型：根据模型名称/ID 包含关键词时默认开启思考
         const runtimeModelId = (rm.modelId || rm.id || '').toLowerCase()
         const modelIdLower = (rm.id || '').toLowerCase()
@@ -1138,6 +1176,15 @@ class ModelConfigManager {
       throw new Error('平台不存在')
     }
 
+    // 防止重复添加：若平台上已有相同 modelId（实际调用时的模型标识）的模型，直接复用
+    const runtimeModelId = model.modelId?.trim()
+    if (runtimeModelId) {
+      const existing = platform.models.find(m => (m.modelId || '').trim() === runtimeModelId)
+      if (existing) {
+        return existing.id
+      }
+    }
+
     const modelId = `${platformId}_${model.name}_${Date.now()}`
     const newModel: AIModel = {
       ...model,
@@ -1164,7 +1211,7 @@ class ModelConfigManager {
   }
 
   /**
-   * 删除模型（远程模型不可删除，调用方应先检查 isRemote）
+   * 删除模型
    */
   removeModel(modelId: string): void {
     for (const platform of this.settings.platforms) {
@@ -1174,6 +1221,13 @@ class ModelConfigManager {
         // 替换选中状态（若被选中，自动切换到同平台同类型的另一个模型）
         this._replaceSelectedModel(modelId, model.category, platform.id)
         platform.models.splice(index, 1)
+        // 远程模型：记录删除，避免下次同步时被恢复
+        if (model.isRemote) {
+          if (!this.settings.deletedRemoteModels) this.settings.deletedRemoteModels = []
+          if (!this.settings.deletedRemoteModels.includes(model.id)) {
+            this.settings.deletedRemoteModels.push(model.id)
+          }
+        }
         break
       }
     }
