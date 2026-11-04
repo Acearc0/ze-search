@@ -2706,8 +2706,10 @@ const callModelAPI = async (requestId: string, query: string) => {
     // 只有文本模型参与基础输出；视觉模型仅在 query 包含图片时才加入
     const hasImage = /https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)/i.test(query) || query.includes('base64')
     const selectedModels = [...globalSelectedTextModels.value]
-    if (hasImage && globalSelectedVisionModel.value) {
-      selectedModels.push(globalSelectedVisionModel.value)
+    const visionModel = hasImage ? globalSelectedVisionModel.value : null
+    if (visionModel && !selectedModels.some(m => m.id === visionModel.id)) {
+      // 同一模型可同时担任文本与视觉角色，去重避免被调用两次
+      selectedModels.push(visionModel)
     }
 
     if (selectedModels.length === 0) {
@@ -2767,8 +2769,9 @@ const callModelAPI = async (requestId: string, query: string) => {
     // 重试条件：仅有一个基础模型，或当前是视觉模型
     const visionModelId = globalSelectedVisionModel.value?.id
     const results: { model: AIModel; response: string; success: boolean }[] = []
-    const modelPromises = selectedModels.map(async (model) => {
-      const allowRetry = selectedModels.length === 1 || (!!visionModelId && model.id === visionModelId)
+
+    const runModelCall = async (model: AIModel, totalModels: number) => {
+      const allowRetry = totalModels === 1 || (!!visionModelId && model.id === visionModelId)
       try {
         const response = await withModelRetry(
           requestId,
@@ -2830,13 +2833,42 @@ const callModelAPI = async (requestId: string, query: string) => {
           success: false
         }
       }
-    })
+    }
 
-    // quorum: 使用 Promise.allSettled 等待所有完成，但通过 onChunk 已经逐步更新了 UI
-    const settledResults = await Promise.allSettled(modelPromises)
-    for (const settled of settledResults) {
-      if (settled.status === 'fulfilled' && settled.value !== null) {
-        results.push(settled.value)
+    // 懒投票：先并发调用前两个模型，仅当答案不一致（或任一失败）时才调用其余模型
+    const firstWave = selectedModels.slice(0, 2)
+    const laterWave = selectedModels.slice(2)
+
+    const runWave = async (models: AIModel[]) => {
+      const settled = await Promise.allSettled(models.map(m => runModelCall(m, selectedModels.length)))
+      for (const s of settled) {
+        if (s.status === 'fulfilled' && s.value !== null) {
+          results.push(s.value)
+        }
+      }
+    }
+
+    await runWave(firstWave)
+
+    if (laterWave.length > 0 && !isRequestCancelled(requestId)) {
+      const r1 = results.find(r => r.model.id === firstWave[0].id)
+      const r2 = results.find(r => r.model.id === firstWave[1].id)
+      const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response) : ''
+      const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response) : ''
+      if (k1 && k1 === k2) {
+        console.log('前两个模型答案一致，跳过其余', laterWave.length, '个模型的调用')
+        const log = requestLogs.value.find(l => l.id === requestId)
+        if (log?.multiModelResponses) {
+          for (const m of laterWave) {
+            const entry = log.multiModelResponses.find(r => r.modelId === m.id)
+            if (entry && entry.isLoading) {
+              entry.isLoading = false
+              entry.response = '（前两个模型答案一致，未调用本模型）'
+            }
+          }
+        }
+      } else {
+        await runWave(laterWave)
       }
     }
 

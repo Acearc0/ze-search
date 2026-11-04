@@ -91,8 +91,10 @@ const isModelSelected = (model: AIModel) => {
 }
 
 const filteredModels = computed(() => {
-  const targetCategory = selectedCategory.value === 'summary' ? 'text' : selectedCategory.value
-  let models = props.availableModels.filter(m => m.category === targetCategory)
+  const selected = selectedCategory.value
+  // 文本/视觉页签均列出两类模型：同一个模型可同时充当文本模型和视觉模型
+  const allowedCategories: string[] = selected === 'summary' ? ['text'] : ['text', 'vision']
+  let models = props.availableModels.filter(m => allowedCategories.includes(m.category))
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.toLowerCase()
     models = models.filter(m => m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q))

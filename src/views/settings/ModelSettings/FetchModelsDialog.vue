@@ -14,6 +14,17 @@
       </div>
 
       <div class="dialog-body">
+        <div class="search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35" stroke-linecap="round"/>
+          </svg>
+          <input
+            type="text"
+            class="search-input"
+            placeholder="搜索模型..."
+            v-model="searchQuery"
+          />
+        </div>
         <div class="fetch-toolbar">
           <button type="button" class="fetch-tool-btn" @click="selectAll">全选新增</button>
           <button type="button" class="fetch-tool-btn" @click="clearAll">清空</button>
@@ -21,7 +32,7 @@
         </div>
         <div class="fetch-list">
           <label
-            v-for="item in items"
+            v-for="item in filteredItems"
             :key="item.id"
             class="fetch-item"
             :class="{ 'fetch-item--exists': item.exists }"
@@ -48,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 export interface FetchModelItem {
   id: string
@@ -67,6 +78,13 @@ const emit = defineEmits<{
 
 const selectedIds = ref<string[]>([])
 const modelTypes = ref<Record<string, 'text' | 'vision'>>({})
+const searchQuery = ref('')
+
+// 列表搜索过滤（与模型选择弹窗一致的交互）
+const filteredItems = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  return q ? props.items.filter(i => i.id.toLowerCase().includes(q)) : props.items
+})
 
 // 按常见命名启发式预判模型类型（vl/vision/4v/image/omni → 视觉），用户可逐行修改
 const guessModelType = (id: string): 'text' | 'vision' => {
@@ -76,6 +94,7 @@ const guessModelType = (id: string): 'text' | 'vision' => {
 // 每次打开时默认勾选全部新模型，并初始化类型
 watch(() => props.visible, (v) => {
   if (v) {
+    searchQuery.value = ''
     selectedIds.value = props.items.filter(i => !i.exists).map(i => i.id)
     const types: Record<string, 'text' | 'vision'> = {}
     for (const item of props.items) types[item.id] = guessModelType(item.id)
@@ -216,10 +235,31 @@ const handleOverlayClick = (event: MouseEvent) => {
   cursor: not-allowed;
 }
 
+.search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--form-input-bg, #F7F7F7);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
 .fetch-item-id {
   flex: 1;
   min-width: 0;
-  font-family: monospace;
+  font-size: 14px;
+  font-weight: 500;
   word-break: break-all;
 }
 

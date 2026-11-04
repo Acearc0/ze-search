@@ -996,9 +996,10 @@ class ModelConfigManager {
    */
   getSelectedVisionModel(): AIModel | null {
     if (!this.settings.selectedVisionModel) return null
-    
+
     const allModels = this.settings.platforms.flatMap(p => p.models)
-    return allModels.find(m => m.id === this.settings.selectedVisionModel && m.category === 'vision') || null
+    // 不再限定 category === 'vision'：允许文本模型兼任视觉模型
+    return allModels.find(m => m.id === this.settings.selectedVisionModel) || null
   }
 
   /**
