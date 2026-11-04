@@ -169,37 +169,40 @@
 
               <!-- 关闭思考：按协议展示可选参数 -->
               <div v-if="!formData.enableThinking" class="thinking-options">
-                <p class="thinking-options-title">关闭时发送的参数</p>
+                <p v-if="modelForbidsDisableThinking" class="thinking-fixed-param">
+                  该模型始终进行推理，不支持关闭思考；以下参数不会发送。
+                </p>
+                <p v-else class="thinking-options-title">关闭时发送的参数</p>
 
                 <template v-if="isChatProtocol">
-                  <label class="thinking-check" :class="{ disabled: isRemote }">
-                    <input type="checkbox" v-model="formData.thinkingOffEnableThinkingFalse" :disabled="isRemote" />
+                  <label class="thinking-check" :class="{ disabled: isRemote || modelForbidsDisableThinking }">
+                    <input type="checkbox" v-model="formData.thinkingOffEnableThinkingFalse" :disabled="isRemote || modelForbidsDisableThinking" />
                     <code>enable_thinking: false</code>
                   </label>
-                  <label class="thinking-check" :class="{ disabled: isRemote }">
-                    <input type="checkbox" v-model="formData.thinkingOffThinkingTypeDisabled" :disabled="isRemote" />
+                  <label class="thinking-check" :class="{ disabled: isRemote || modelForbidsDisableThinking }">
+                    <input type="checkbox" v-model="formData.thinkingOffThinkingTypeDisabled" :disabled="isRemote || modelForbidsDisableThinking" />
                     <code>thinking: &#123; type: "disabled" &#125;</code>
                   </label>
                 </template>
 
                 <template v-else-if="isResponsesProtocol">
-                  <label class="thinking-check" :class="{ disabled: isRemote }">
+                  <label class="thinking-check" :class="{ disabled: isRemote || modelForbidsDisableThinking }">
                     <input
                       type="radio"
                       name="thinking-off-responses-effort"
                       value="none"
                       v-model="formData.thinkingOffResponsesEffort"
-                      :disabled="isRemote"
+                      :disabled="isRemote || modelForbidsDisableThinking"
                     />
                     <code>reasoning.effort: "none"</code>
                   </label>
-                  <label class="thinking-check" :class="{ disabled: isRemote }">
+                  <label class="thinking-check" :class="{ disabled: isRemote || modelForbidsDisableThinking }">
                     <input
                       type="radio"
                       name="thinking-off-responses-effort"
                       value="minimal"
                       v-model="formData.thinkingOffResponsesEffort"
-                      :disabled="isRemote"
+                      :disabled="isRemote || modelForbidsDisableThinking"
                     />
                     <code>reasoning.effort: "minimal"</code>
                   </label>
@@ -221,7 +224,7 @@
                 </p>
                 <div class="thinking-effort-switch">
                   <button
-                    v-for="opt in thinkingEffortOptions"
+                    v-for="opt in visibleThinkingEffortOptions"
                     :key="opt.value"
                     type="button"
                     class="thinking-effort-btn"
@@ -230,6 +233,7 @@
                     @click="!isRemote && (formData.thinkingEffort = opt.value)"
                   >{{ opt.label }}</button>
                 </div>
+                <p v-if="thinkingEffortAdjustedHint" class="form-hint">{{ thinkingEffortAdjustedHint }}</p>
               </div>
             </div>
 
@@ -250,7 +254,7 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { linter, lintGutter } from '@codemirror/lint'
 import * as acorn from 'acorn'
 import { type AIModel, type ThinkingEffort, type ThinkingOffResponsesEffort } from '../../../services/modelConfig'
-import { buildPresetProcessModelJsCode, normalizeApiProtocol, readModelIdFromJsCode } from '../../../services/modelProtocol'
+import { buildPresetProcessModelJsCode, normalizeApiProtocol, readModelIdFromJsCode, resolveModelParamConstraints, mapEffortToVocab } from '../../../services/modelProtocol'
 import { useExclusiveMenu } from '../../../composables/useExclusiveMenu'
 import ModelCategorySwitch from './ModelCategorySwitch.vue'
 
@@ -327,6 +331,17 @@ const requiresModelId = computed(() => formData.value.apiProtocol !== 'custom')
 const isChatProtocol = computed(() => formData.value.apiProtocol === 'openai-chat' || formData.value.apiProtocol === 'custom')
 const isResponsesProtocol = computed(() => formData.value.apiProtocol === 'openai-response')
 const isMessagesProtocol = computed(() => formData.value.apiProtocol === 'anthropic')
+
+// 按 modelId 命中的厂商参数约束：用于过滤思考强度档位、提示不支持关闭思考
+const modelParamConstraints = computed(() => resolveModelParamConstraints(formData.value.modelId))
+const modelForbidsDisableThinking = computed(() => modelParamConstraints.value.forbidDisableThinking)
+const visibleThinkingEffortOptions = computed(() => {
+  const vocab = modelParamConstraints.value.effortVocab
+  if (!vocab || !vocab.length) return thinkingEffortOptions
+  return thinkingEffortOptions.filter(option => vocab.includes(option.value))
+})
+
+const thinkingEffortAdjustedHint = ref('')
 const isFormValid = computed(() => {
   if (!formData.value.displayName.trim()) return false
   if (requiresModelId.value && !formData.value.modelId.trim()) return false
@@ -812,12 +827,35 @@ watch(
   }
 )
 
-// 刚开启思考时，若强度非法则落到默认 medium
+// 刚开启思考时，若强度非法则落到该模型合法词表内的值（无约束时仍为 medium）
 watch(() => formData.value.enableThinking, (enabled, wasEnabled) => {
   if (enabled && !wasEnabled) {
-    formData.value.thinkingEffort = normalizeEffort(formData.value.thinkingEffort) || 'medium'
+    const base = normalizeEffort(formData.value.thinkingEffort) || 'medium'
+    formData.value.thinkingEffort = mapEffortToVocab(base, modelParamConstraints.value.effortVocab)
   }
 })
+
+// 切换模型 ID 后，若当前强度不在该模型词表内，自动纠正并提示（避免发出必然 400 的请求）
+watch(
+  () => [formData.value.modelId, formData.value.apiProtocol, modelParamConstraints.value.effortVocab],
+  () => {
+    const vocab = modelParamConstraints.value.effortVocab
+    if (!vocab || !vocab.length) {
+      thinkingEffortAdjustedHint.value = ''
+      return
+    }
+    const current = formData.value.thinkingEffort
+    const mapped = mapEffortToVocab(current, vocab)
+    if (mapped !== current) {
+      formData.value.thinkingEffort = mapped
+      thinkingEffortAdjustedHint.value =
+        `该模型仅支持 ${vocab.join(' / ')}，思考强度已由 ${current} 调整为 ${mapped}。`
+    } else {
+      thinkingEffortAdjustedHint.value = `该模型仅支持 ${vocab.join(' / ')}。`
+    }
+  },
+  { immediate: true }
+)
 
 // jsCode 变化（用户在编辑器中手改）→ 回写开关
 watch(() => formData.value.jsCode, (code) => {

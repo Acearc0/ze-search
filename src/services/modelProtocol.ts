@@ -71,9 +71,135 @@ export const normalizeThinkingOptions = (options?: ThinkingRuntimeOptions) => {
   }
 }
 
+/**
+ * 模型级参数约束表。
+ *
+ * 背景：各家厂商对同一批 OpenAI 兼容参数接受范围不同，且多为「传入非法值直接 400」而非忽略。
+ * 已实测的两例：
+ *   - GLM-5.3：reasoning_effort 仅 low/high/max，传 medium 报 invalid_parameter_error
+ *   - Kimi K3 ：temperature 固定 1.0、top_p 固定 0.95（官方建议不要显式传入），传 0.7 报 400
+ * 因此按 modelId 命中规则，在生成调用代码时裁剪/映射参数；未命中的模型一律保持原行为。
+ *
+ * 依据：
+ *   https://docs.bigmodel.cn/cn/guide/capabilities/thinking （GLM-5.3/5.2 词表与映射）
+ *   https://platform.kimi.com/docs/api/models-overview （K3/K2.7/K2.6 参数固定值表）
+ */
+export type ModelParamConstraints = {
+  /** 请求体中不显式传 temperature（该模型固定取值，传其他值报错） */
+  omitTemperature: boolean
+  /** 请求体中不显式传 top_p */
+  omitTopP: boolean
+  /** 该模型不接受 reasoning_effort / reasoning 字段，完全不发 */
+  dropReasoningEffort: boolean
+  /** 关闭思考不被支持：不发任何「关闭」参数，交由模型默认行为 */
+  forbidDisableThinking: boolean
+  /** 接受的思考强度词表；null 表示不干预 */
+  effortVocab: ThinkingEffortValue[] | null
+}
+
+type ThinkingEffortValue = NonNullable<AIModel['thinkingEffort']>
+
+const DEFAULT_MODEL_PARAM_CONSTRAINTS: ModelParamConstraints = {
+  omitTemperature: false,
+  omitTopP: false,
+  dropReasoningEffort: false,
+  forbidDisableThinking: false,
+  effortVocab: null
+}
+
+// 智谱 GLM-5.3 系与 Kimi K3 系恰好共用同一套三档词表
+const THREE_TIER_EFFORT_VOCAB: ThinkingEffortValue[] = ['low', 'high', 'max']
+
+const MODEL_PARAM_RULES: Array<{ test: RegExp; constraints: Partial<ModelParamConstraints> }> = [
+  // Kimi K3 / K3.1 Pro（含 highspeed）：temperature 固定 1.0、top_p 固定 0.95；始终思考；effort 三档
+  {
+    test: /^kimi[-_]?k3(\.1)?(-pro)?(-highspeed)?$/i,
+    constraints: {
+      omitTemperature: true,
+      omitTopP: true,
+      forbidDisableThinking: true,
+      effortVocab: THREE_TIER_EFFORT_VOCAB
+    }
+  },
+  // Kimi K2.7 Code：temperature/top_p 固定，且不支持 reasoning_effort（始终思考，不可关闭）
+  {
+    test: /^kimi[-_]?k2\.?7(-code)?(-highspeed)?$/i,
+    constraints: {
+      omitTemperature: true,
+      omitTopP: true,
+      dropReasoningEffort: true,
+      forbidDisableThinking: true
+    }
+  },
+  // Kimi K2.6：top_p 固定 0.95；temperature 随思考开关变化（1.0/0.6）故一律不显式传；不支持 reasoning_effort
+  {
+    test: /^kimi[-_]?k2\.?6(-highspeed)?$/i,
+    constraints: {
+      omitTemperature: true,
+      omitTopP: true,
+      dropReasoningEffort: true
+    }
+  },
+  // GLM-5.3 / Flash / FlashX：effort 仅 low/high/max，且不再支持关闭思考
+  {
+    test: /^glm[-_]?5\.3(-flashx?|-flash)?$/i,
+    constraints: {
+      forbidDisableThinking: true,
+      effortVocab: THREE_TIER_EFFORT_VOCAB
+    }
+  }
+  // GLM-5.2 未列入：它接受 low/medium/high/max（本项目词表），medium 合法，无需干预
+]
+
+export const resolveModelParamConstraints = (modelId?: string | null): ModelParamConstraints => {
+  const raw = String(modelId || '').trim().toLowerCase()
+  if (!raw) return { ...DEFAULT_MODEL_PARAM_CONSTRAINTS }
+
+  // 兼容带路由前缀/后缀的写法：moonshot/kimi-k3、kimi-k3:free、Pro/zai-org/GLM-5
+  const candidates = [raw, raw.split('/').pop() || raw]
+    .map(item => item.replace(/:[a-z0-9_-]+$/i, ''))
+
+  for (const rule of MODEL_PARAM_RULES) {
+    if (candidates.some(id => rule.test.test(id))) {
+      return { ...DEFAULT_MODEL_PARAM_CONSTRAINTS, ...rule.constraints }
+    }
+  }
+
+  return { ...DEFAULT_MODEL_PARAM_CONSTRAINTS }
+}
+
+/**
+ * 把用户选择的思考强度映射进该模型的合法词表。
+ * 映射语义沿用智谱官方对 GLM-5.2 的定义：medium→high、minimal/none→low、xhigh→max。
+ */
+export const mapEffortToVocab = (
+  effort: ThinkingEffortValue,
+  vocab: ThinkingEffortValue[] | null
+): ThinkingEffortValue => {
+  if (!vocab || !vocab.length) return effort
+  if (vocab.includes(effort)) return effort
+
+  const fallbackMap: Record<string, ThinkingEffortValue> = {
+    medium: 'high',
+    minimal: 'low',
+    none: 'low',
+    xhigh: 'max'
+  }
+  const mapped = fallbackMap[effort]
+  if (mapped && vocab.includes(mapped)) return mapped
+
+  // 词表里没有可用映射时取官方默认档，避免发出必然报错的值
+  const preferred: ThinkingEffortValue[] = ['max', 'high', 'medium', 'low']
+  for (const candidate of preferred) {
+    if (vocab.includes(candidate)) return candidate
+  }
+  return effort
+}
+
 const buildCommonHelpers = () => `
   const PRESET_MODEL_ID = __MODEL_ID__;
   const THINKING = __THINKING__;
+  const PARAMS = __PARAMS__;
   const ENABLE_THINKING = !!(THINKING && THINKING.enable);
 
   const pickFirstString = (...values) => {
@@ -93,14 +219,21 @@ const buildCommonHelpers = () => `
 
   // Chat：关 → enable_thinking / thinking.type；开 → reasoning_effort
   // Responses：关 → reasoning.effort none|minimal；开 → reasoning.effort
+  // PARAMS 由构建期按 modelId 命中厂商约束表得出：omitTemperature/omitTopP/dropReasoningEffort/
+  // forbidDisableThinking 为开关，effort 已映射进该模型合法词表
   // apiKind: 'chat' | 'responses'
   const applyOpenAIThinkingPayload = (payload, apiKind) => {
     const kind = apiKind === 'responses' ? 'responses' : 'chat';
     const effort = (THINKING && THINKING.effort) || 'medium';
+    const dropEffort = !!(PARAMS && PARAMS.dropReasoningEffort);
+    const forbidDisable = !!(PARAMS && PARAMS.forbidDisableThinking);
 
     if (kind === 'responses') {
+      if (dropEffort) return;
       if (ENABLE_THINKING) {
-        payload.reasoning = { effort: effort };
+        payload.reasoning = { effort: (PARAMS && PARAMS.effort) || effort };
+      } else if (forbidDisable) {
+        // 该模型不支持关闭思考：不发 reasoning，交由模型默认行为
       } else {
         const offEffort = (THINKING && THINKING.offResponsesEffort) || 'minimal';
         payload.reasoning = { effort: offEffort };
@@ -110,15 +243,26 @@ const buildCommonHelpers = () => `
 
     // chat
     if (ENABLE_THINKING) {
-      payload.reasoning_effort = effort;
+      if (!dropEffort) payload.reasoning_effort = (PARAMS && PARAMS.effort) || effort;
       return;
     }
+    if (forbidDisable) return;
     if (!THINKING || THINKING.offEnableThinkingFalse !== false) {
       payload.enable_thinking = false;
     }
     if (THINKING && THINKING.offThinkingTypeDisabled) {
       payload.thinking = { type: 'disabled' };
     }
+  };
+
+  // 采样参数：命中约束表的模型不显式传 temperature / top_p（官方为固定值，传其他值直接 400）
+  const applySamplingParams = (payload) => {
+    const omitTemp = !!(PARAMS && PARAMS.omitTemperature);
+    const omitTopP = !!(PARAMS && PARAMS.omitTopP);
+
+    if (!omitTemp && typeof config.temperature === 'number') payload.temperature = config.temperature;
+    if (!omitTopP && typeof config.topP === 'number') payload.top_p = config.topP;
+    if (typeof config.maxTokens === 'number') payload.max_tokens = config.maxTokens;
   };
 
   const getRuntimeModelId = () => PRESET_MODEL_ID || config.modelId || input.model || config.model || '';
@@ -454,13 +598,22 @@ const buildCommonHelpers = () => `
   };
 `
 
-const injectTemplateHelpers = (modelId: string, thinking: ReturnType<typeof normalizeThinkingOptions>) =>
-  buildCommonHelpers()
+const injectTemplateHelpers = (modelId: string, thinking: ReturnType<typeof normalizeThinkingOptions>) => {
+  // 构建期解析厂商约束：modelId 在此已知，无需把词表逻辑塞进生成的运行时代码
+  const constraints = resolveModelParamConstraints(modelId)
+  const params = {
+    ...constraints,
+    effort: mapEffortToVocab(thinking.effort, constraints.effortVocab)
+  }
+
+  return buildCommonHelpers()
     .replace('__MODEL_ID__', JSON.stringify(modelId))
     .replace('__THINKING__', JSON.stringify(thinking))
+    .replace('__PARAMS__', JSON.stringify(params))
     .split('\n')
     .map((line) => `  ${line}`)
     .join('\n')
+}
 
 const buildOpenAIChatTemplate = (modelId: string, thinking: ReturnType<typeof normalizeThinkingOptions>) => `
 async function processModel(input, config, fetch, abortSignal) {
@@ -476,9 +629,7 @@ ${injectTemplateHelpers(modelId, thinking)}
   if (input.tools && input.tools.length) {
     payload.tools = input.tools;
   }
-  if (typeof config.temperature === 'number') payload.temperature = config.temperature;
-  if (typeof config.topP === 'number') payload.top_p = config.topP;
-  if (typeof config.maxTokens === 'number') payload.max_tokens = config.maxTokens;
+  applySamplingParams(payload);
   applyOpenAIThinkingPayload(payload, 'chat');
 
   const response = await fetch(buildApiUrl(config.baseUrl, '/chat/completions'), {
@@ -618,9 +769,10 @@ ${injectTemplateHelpers(modelId, thinking)}
     payload.tools = input.tools.map(mapAnthropicTool).filter(Boolean);
   }
   if (ENABLE_THINKING) {
-    const effort = (THINKING && THINKING.effort) || 'medium';
-    payload.reasoning = { effort: effort };
-  } else {
+    if (!PARAMS || !PARAMS.dropReasoningEffort) {
+      payload.reasoning = { effort: (PARAMS && PARAMS.effort) || (THINKING && THINKING.effort) || 'medium' };
+    }
+  } else if (!PARAMS || !PARAMS.forbidDisableThinking) {
     payload.thinking = { type: 'disabled' };
   }
 
