@@ -117,6 +117,33 @@
     </div>
 
     <div class="network-group">
+      <div class="group-title">多模型答题</div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">启用懒投票</h3>
+        <p class="setting-description">开启时先并发调用前两个模型，答案一致则直接采用并跳过其余模型，不一致（或任一失败）才继续调用；关闭时所有已选模型并发调用。默认开启。</p>
+      </div>
+      <div class="setting-control">
+        <Toggle v-model="settings.answerLazyVote" variant="default" size="medium"
+          @change="handleSettingChange('answerLazyVote', $event)" />
+      </div>
+    </div>
+    <div class="setting-item">
+      <div class="setting-info">
+        <h3 class="setting-title">第三模型（仲裁模型）</h3>
+        <p class="setting-description">懒投票下前两个模型答案不一致时，仅调用该模型参与投票取多数票；不指定则调用其余已选模型共同投票。与已选文本模型重复时自动忽略。</p>
+      </div>
+      <div class="setting-control">
+        <select class="form-input" :value="settings.arbitrationModelId ?? ''"
+          @change="handleSettingChange('arbitrationModelId', ($event.target as HTMLSelectElement).value || null)">
+          <option value="">不指定（其余已选模型共同投票）</option>
+          <option v-for="m in arbitrationCandidates" :key="m.id" :value="m.id">{{ m.displayName }}</option>
+        </select>
+      </div>
+    </div>
+    </div>
+
+    <div class="network-group">
       <div class="group-title">联网搜索</div>
     <div class="setting-item">
       <div class="setting-info">
@@ -276,6 +303,7 @@
 import { computed, ref, onMounted } from 'vue'
 
 import { useSettingsManager } from '../../composables/useSettingsManager'
+import { useModelConfig } from '../../services/modelConfig'
 
 import { useTheme } from '../../composables/useTheme'
 import { environmentDetector } from '../../services/environmentDetector'
@@ -346,6 +374,12 @@ const openCacheFolder = async () => {
 }
 // 设置管理
 const { settings, saveSettings, setSetting } = useSettingsManager()
+
+// 多模型答题：第三模型（仲裁模型）候选列表 = 所有已启用模型（不限分类）
+const modelConfigStore = useModelConfig()
+const arbitrationCandidates = computed(() =>
+  (modelConfigStore.platforms?.value || []).flatMap(p => (p.models || []).filter(m => m.enabled))
+)
 const canOpenQuestionSaveFolder = computed(() => settings.value.questionSaveFolderId !== null && settings.value.questionSaveFolderId !== undefined)
 
 

@@ -15,6 +15,10 @@ export interface AppSettings {
   modelResponseTimeout: number
   // 模型失败自动重试次数（仅单模型 / 总结模型 / 视觉模型）；0 表示不重试
   modelRetryCount: number
+  // 多模型懒投票：开启时先调用前两个模型，答案一致则跳过其余模型
+  answerLazyVote: boolean
+  // 第三模型（仲裁模型）：懒投票下前两个模型答案不一致时启用；null 表示调用其余已选模型共同投票
+  arbitrationModelId: string | null
 
   // 联网搜索设置（默认关闭；开启后向模型注入 web_search 工具）
   webSearch: WebSearchSettings
@@ -77,6 +81,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoAddToQuestionBank: true,
   modelResponseTimeout: 40,
   modelRetryCount: 2,
+  answerLazyVote: true,
+  arbitrationModelId: null,
   webSearch: {
     enabled: false,
     engine: 'bing',
@@ -357,6 +363,8 @@ class SettingsManager {
       modelResponseTimeout: '文本模型最长响应时间（秒）',
       modelRetryCount: '模型失败自动重试次数',
       webSearch: '联网搜索配置（默认关闭）',
+      answerLazyVote: '多模型懒投票（前两个模型答案一致时跳过其余模型）',
+      arbitrationModelId: '第三模型（仲裁模型）ID',
 
       network: '网络配置设置',
       windowSize: '窗口大小',

@@ -2835,10 +2835,6 @@ const callModelAPI = async (requestId: string, query: string) => {
       }
     }
 
-    // 懒投票：先并发调用前两个模型，仅当答案不一致（或任一失败）时才调用其余模型
-    const firstWave = selectedModels.slice(0, 2)
-    const laterWave = selectedModels.slice(2)
-
     const runWave = async (models: AIModel[]) => {
       const settled = await Promise.allSettled(models.map(m => runModelCall(m, selectedModels.length)))
       for (const s of settled) {
@@ -2848,27 +2844,77 @@ const callModelAPI = async (requestId: string, query: string) => {
       }
     }
 
-    await runWave(firstWave)
+    // 懒投票（可在设置中关闭）：先并发调用前两个模型，答案一致则跳过其余模型
+    const { settings: voteSettings } = useSettings()
+    const lazyVoteEnabled = voteSettings.answerLazyVote !== false
+    const arbId = voteSettings.arbitrationModelId
+    const arbitrationModel = arbId
+      ? platforms.value.flatMap(p => p.models).find(m => m.id === arbId && m.enabled) || null
+      : null
 
-    if (laterWave.length > 0 && !isRequestCancelled(requestId)) {
-      const r1 = results.find(r => r.model.id === firstWave[0].id)
-      const r2 = results.find(r => r.model.id === firstWave[1].id)
-      const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response) : ''
-      const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response) : ''
-      if (k1 && k1 === k2) {
-        console.log('前两个模型答案一致，跳过其余', laterWave.length, '个模型的调用')
-        const log = requestLogs.value.find(l => l.id === requestId)
-        if (log?.multiModelResponses) {
-          for (const m of laterWave) {
-            const entry = log.multiModelResponses.find(r => r.modelId === m.id)
-            if (entry && entry.isLoading) {
-              entry.isLoading = false
-              entry.response = '（前两个模型答案一致，未调用本模型）'
+    if (selectedModels.length < 2 || !lazyVoteEnabled) {
+      // 少于两个模型或关闭懒投票：全部并发调用
+      await runWave(selectedModels)
+    } else {
+      const firstWave = selectedModels.slice(0, 2)
+      const laterWave = selectedModels.slice(2)
+
+      await runWave(firstWave)
+
+      if (!isRequestCancelled(requestId)) {
+        const r1 = results.find(r => r.model.id === firstWave[0].id)
+        const r2 = results.find(r => r.model.id === firstWave[1].id)
+        const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response) : ''
+        const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response) : ''
+
+        if (k1 && k1 === k2) {
+          console.log('前两个模型答案一致，跳过其余', laterWave.length, '个模型的调用')
+          const log = requestLogs.value.find(l => l.id === requestId)
+          if (log?.multiModelResponses) {
+            for (const m of laterWave) {
+              const entry = log.multiModelResponses.find(r => r.modelId === m.id)
+              if (entry && entry.isLoading) {
+                entry.isLoading = false
+                entry.response = '（前两个模型答案一致，未调用本模型）'
+              }
             }
           }
+        } else {
+          // 答案不一致：优先用设置的第三模型仲裁；未设置或与前两个重复时，调用其余已选模型
+          const arb = arbitrationModel && !firstWave.some(m => m.id === arbitrationModel.id)
+            ? arbitrationModel
+            : null
+          const log = requestLogs.value.find(l => l.id === requestId)
+          if (arb) {
+            if (log?.multiModelResponses) {
+              // 其余已选模型不再调用
+              for (const m of laterWave) {
+                const entry = log.multiModelResponses.find(r => r.modelId === m.id)
+                if (entry && entry.isLoading) {
+                  entry.isLoading = false
+                  entry.response = '（已由第三模型仲裁，未调用本模型）'
+                }
+              }
+              // 仲裁模型可能不在已选列表中，补充日志条目以展示其输出
+              if (!log.multiModelResponses.some(r => r.modelId === arb.id)) {
+                const arbPlatform = platforms.value.find(p => p.models.some(m => m.id === arb.id))
+                log.multiModelResponses.push({
+                  modelId: arb.id,
+                  modelName: arb.displayName,
+                  platformName: arbPlatform?.displayName || '未知平台',
+                  response: '',
+                  streamingReasoning: '',
+                  reasoningContent: '',
+                  isLoading: true
+                } as MultiModelResponse)
+              }
+            }
+            console.log('前两个模型答案不一致，启用第三模型仲裁:', arb.displayName)
+            await runWave([arb])
+          } else if (laterWave.length > 0) {
+            await runWave(laterWave)
+          }
         }
-      } else {
-        await runWave(laterWave)
       }
     }
 
