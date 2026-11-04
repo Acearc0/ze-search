@@ -1352,8 +1352,8 @@ const addFetchedModels = async (added: { id: string; category: 'text' | 'vision'
   const platform = selectedPlatform.value
   if (!platform) return
   const platformId = platform.id
-  // 拉取的模型跟随平台现有模型的 API 协议（如 Anthropic 端点拉取的模型也走 anthropic 协议）；custom 不继承
-  const siblingProtocol = platform.models.find(m => m.apiProtocol && m.apiProtocol !== 'custom')?.apiProtocol
+  // 能通过 /models 拉取列表的端点必然是 OpenAI 兼容的，拉取的模型默认走 openai-chat 协议
+  // （不继承平台已有模型的协议，避免远程目录协议与实际端点不匹配导致 404）
   let lastId: string | null = null
   let lastCategory: 'text' | 'vision' = 'text'
   for (const item of added) {
@@ -1366,7 +1366,7 @@ const addFetchedModels = async (added: { id: string; category: 'text' | 'vision'
       enabled: true,
       modelId: item.id,
       jsCode: '',
-      apiProtocol: siblingProtocol,
+      apiProtocol: 'openai-chat',
       category: item.category,
       enableThinking: false,
       thinkingOffEnableThinkingFalse: true,
