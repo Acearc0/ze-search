@@ -550,6 +550,7 @@ import {
   resolveUrlAnswer,
 } from '../utils/urlQuestion'
 import { normalizeAnswerJsonContent } from '../utils/answerNormalize'
+import { buildAnswerCompareKey, extractAnswerFromMixedContent } from '../utils/answerExtract'
 import { buildAnswerChatMessages } from '../utils/answerFewShot'
 
 
@@ -1961,10 +1962,10 @@ const formatModelOutputs = (
   return usable.map(e => `[${e.model.displayName}]\n${e.response}`).join('\n\n')
 }
 
+// 比较键：先提取 answer 字段再归一化（去空白/全半角/大小写），
+// 避免「解释段落 + JSON 风格差异」把答案一致的模型误判为不一致（见 utils/answerExtract.ts）
 const normalizeAnswerForComparison = (content: string): string => {
-  return stripMarkdownCodeBlock(content || '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return buildAnswerCompareKey(content || '')
 }
 
 const getMostFrequentSuccessfulAnswer = (responses: string[]): string => {
@@ -1972,7 +1973,7 @@ const getMostFrequentSuccessfulAnswer = (responses: string[]): string => {
 
   responses.forEach((response, index) => {
     const original = stripMarkdownCodeBlock(response).trim()
-    const key = normalizeAnswerForComparison(original)
+    const key = normalizeAnswerForComparison(response)
     if (!key) return
 
     const existing = answerStats.get(key)
@@ -3338,80 +3339,12 @@ const storeAIResponseToDatabase = async (requestId: string, content: string) => 
 
     console.log('🔍 清理后的内容:', cleanedContent)
 
-    const extractAnswerFromMixedContent = (text: string): string => {
-      // 尝试直接解析为JSON
-      try {
-        const obj = JSON.parse(text)
-        if (obj && typeof obj === 'object') {
-          if (typeof obj.answer === 'string') {
-            console.log('✅ 直接解析文本为JSON并提取到答案:', obj.answer)
-            return obj.answer
-          }
-          if (typeof obj.anwser === 'string') {
-            console.log('✅ 直接解析文本为JSON并提取到anwser(拼写错误):', obj.anwser)
-            return obj.anwser
-          }
-        }
-      } catch { }
-
-      // 从末尾提取最后一个平衡的JSON对象
-      const extractLastBalancedJson = (s: string): string | null => {
-        let end = -1
-        let depth = 0
-        for (let i = s.length - 1; i >= 0; i--) {
-          const ch = s[i]
-          if (end === -1) {
-            if (ch === '}') {
-              end = i
-              depth = 1
-              continue
-            }
-          } else {
-            if (ch === '}') {
-              depth++
-            } else if (ch === '{') {
-              depth--
-              if (depth === 0) {
-                const candidate = s.slice(i, end + 1)
-                return candidate
-              }
-            }
-          }
-        }
-        return null
-      }
-
-      const jsonStr = extractLastBalancedJson(text)
-      if (jsonStr) {
-        console.log('🔎 发现末尾的JSON片段:', jsonStr)
-        try {
-          const obj = JSON.parse(jsonStr)
-          if (typeof obj.answer === 'string') {
-            console.log('✅ 从末尾JSON片段中提取到答案:', obj.answer)
-            return obj.answer
-          }
-          if (typeof obj.anwser === 'string') {
-            console.log('✅ 从末尾JSON片段中提取到anwser(拼写错误):', obj.anwser)
-            return obj.anwser
-          }
-        } catch (e) {
-          console.log('⚠️ 末尾JSON片段解析失败:', e)
-        }
-      }
-
-      // 正则回退，直接在文本中匹配 answer 字段
-      const regex = /\{\s*"(?:answer|anwser)"\s*:\s*"([^"]+)"[\s\S]*?\}/s
-      const m = text.match(regex)
-      if (m && m[1]) {
-        console.log('✅ 通过正则从混合文本中捕获到答案:', m[1])
-        return m[1]
-      }
-
+    // 提取 answer 字段；提取失败时保持原行为——回退为清理后的原始内容入库
+    const parsedAnswer = extractAnswerFromMixedContent(cleanedContent)
+    if (!parsedAnswer) {
       console.log('⚠️ 未能提取到结构化答案，回退为原始内容')
-      return text
     }
-
-    extractedAnswer = extractAnswerFromMixedContent(cleanedContent).trim()
+    extractedAnswer = (parsedAnswer || cleanedContent).trim()
 
     if (!extractedAnswer) {
       console.warn('⚠️ AI最终处理结果答案为空，跳过保存题目', { requestId, title })
