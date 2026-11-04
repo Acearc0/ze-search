@@ -17,7 +17,7 @@
         <div class="fetch-toolbar">
           <button type="button" class="fetch-tool-btn" @click="selectAll">全选新增</button>
           <button type="button" class="fetch-tool-btn" @click="clearAll">清空</button>
-          <span class="fetch-hint">已存在的模型不会重复添加</span>
+          <span class="fetch-hint">按模型命名预填类型，可逐行修改</span>
         </div>
         <div class="fetch-list">
           <label
@@ -28,6 +28,17 @@
           >
             <input type="checkbox" :value="item.id" v-model="selectedIds" :disabled="item.exists" />
             <span class="fetch-item-id">{{ item.id }}</span>
+            <select
+              class="fetch-type-select"
+              :value="modelTypes[item.id] || 'text'"
+              :disabled="item.exists"
+              title="模型类型：文本=普通问答，视觉=图片识别"
+              @click.stop
+              @change.stop="setModelType(item.id, ($event.target as HTMLSelectElement).value as 'text' | 'vision')"
+            >
+              <option value="text">文本</option>
+              <option value="vision">视觉</option>
+            </select>
             <span v-if="item.exists" class="fetch-exists-tag">已存在</span>
           </label>
         </div>
@@ -50,18 +61,31 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  confirm: [ids: string[]]
+  confirm: [added: { id: string; category: 'text' | 'vision' }[]]
   cancel: []
 }>()
 
 const selectedIds = ref<string[]>([])
+const modelTypes = ref<Record<string, 'text' | 'vision'>>({})
 
-// 每次打开时默认勾选全部新模型
+// 按常见命名启发式预判模型类型（vl/vision/4v/image/omni → 视觉），用户可逐行修改
+const guessModelType = (id: string): 'text' | 'vision' => {
+  return /vision|-vl|vl-|-4v|4v-|image|omni/i.test(id) ? 'vision' : 'text'
+}
+
+// 每次打开时默认勾选全部新模型，并初始化类型
 watch(() => props.visible, (v) => {
   if (v) {
     selectedIds.value = props.items.filter(i => !i.exists).map(i => i.id)
+    const types: Record<string, 'text' | 'vision'> = {}
+    for (const item of props.items) types[item.id] = guessModelType(item.id)
+    modelTypes.value = types
   }
 })
+
+const setModelType = (id: string, type: 'text' | 'vision') => {
+  modelTypes.value[id] = type
+}
 
 const selectAll = () => {
   selectedIds.value = props.items.filter(i => !i.exists).map(i => i.id)
@@ -73,7 +97,10 @@ const clearAll = () => {
 
 const handleConfirm = () => {
   if (selectedIds.value.length > 0) {
-    emit('confirm', [...selectedIds.value])
+    emit('confirm', selectedIds.value.map(id => ({
+      id,
+      category: modelTypes.value[id] === 'vision' ? 'vision' as const : 'text' as const
+    })))
   }
 }
 
@@ -190,12 +217,30 @@ const handleOverlayClick = (event: MouseEvent) => {
 }
 
 .fetch-item-id {
+  flex: 1;
+  min-width: 0;
   font-family: monospace;
   word-break: break-all;
 }
 
-.fetch-exists-tag {
+.fetch-type-select {
+  flex-shrink: 0;
   margin-left: auto;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.3));
+  background: var(--platform-config-overlay-bg);
+  color: var(--platform-config-dialog-title-text);
+  cursor: pointer;
+}
+
+.fetch-type-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fetch-exists-tag {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-secondary);

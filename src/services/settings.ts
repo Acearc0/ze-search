@@ -19,10 +19,6 @@ export interface AppSettings {
   // 联网搜索设置（默认关闭；开启后向模型注入 web_search 工具）
   webSearch: WebSearchSettings
 
-  // 答案二次自检（默认关闭；开启后每题多一次模型调用复核答案，降低答错率）
-  answerSelfCheck: {
-    enabled: boolean
-  }
 
   
   // 题目显示设置
@@ -89,9 +85,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     timeoutSeconds: 12,
     searxngInstances: ''
   },
-  answerSelfCheck: {
-    enabled: false
-  },
 
   defaultDifficulty: 'medium',
   itemsPerPage: 20,
@@ -150,7 +143,7 @@ class SettingsManager {
       if (stored) {
         const parsedSettings = { ...(JSON.parse(stored) || {}) }
         delete parsedSettings.enableNonThinkingModelAnalysis
-        return { ...DEFAULT_SETTINGS, ...parsedSettings, network: { ...DEFAULT_SETTINGS.network, ...(parsedSettings.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsedSettings.webSearch || {}) }, answerSelfCheck: { ...DEFAULT_SETTINGS.answerSelfCheck, ...(parsedSettings.answerSelfCheck || {}) } }
+        return { ...DEFAULT_SETTINGS, ...parsedSettings, network: { ...DEFAULT_SETTINGS.network, ...(parsedSettings.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsedSettings.webSearch || {}) } }
       }
 
 
@@ -171,7 +164,7 @@ class SettingsManager {
       if (content) {
         const parsed = { ...(JSON.parse(content) || {}) }
         delete parsed.enableNonThinkingModelAnalysis
-        Object.assign(this.settings, { ...DEFAULT_SETTINGS, ...parsed, network: { ...DEFAULT_SETTINGS.network, ...(parsed.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsed.webSearch || {}) }, answerSelfCheck: { ...DEFAULT_SETTINGS.answerSelfCheck, ...(parsed.answerSelfCheck || {}) } })
+        Object.assign(this.settings, { ...DEFAULT_SETTINGS, ...parsed, network: { ...DEFAULT_SETTINGS.network, ...(parsed.network || {}) }, webSearch: { ...DEFAULT_SETTINGS.webSearch, ...(parsed.webSearch || {}) } })
         console.log('已从配置文件加载设置')
       }
 
@@ -364,7 +357,6 @@ class SettingsManager {
       modelResponseTimeout: '文本模型最长响应时间（秒）',
       modelRetryCount: '模型失败自动重试次数',
       webSearch: '联网搜索配置（默认关闭）',
-      answerSelfCheck: '答案二次自检（默认关闭）',
 
       network: '网络配置设置',
       windowSize: '窗口大小',

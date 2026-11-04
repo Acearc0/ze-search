@@ -204,20 +204,6 @@
     </div>
 
     <div class="network-group">
-      <div class="group-title">答题增强</div>
-      <div class="setting-item">
-        <div class="setting-info">
-          <h3 class="setting-title">答案二次自检</h3>
-          <p class="setting-description">开启后，每题在出答后再让同一模型独立复核一次，仅在模型明确给出不同答案时才修正。可降低答错率，但每题多一次模型调用（耗时与用量约翻倍）。</p>
-        </div>
-        <div class="setting-control">
-          <Toggle v-model="settings.answerSelfCheck.enabled" variant="default" size="medium"
-            @change="updateAnswerSelfCheck({ enabled: $event })" />
-        </div>
-      </div>
-    </div>
-
-    <div class="network-group">
       <div class="group-title">网络设置</div>
     <div class="setting-item">
       <div class="setting-info">
@@ -397,12 +383,6 @@ type WebSearchEngine = import('../../services/webSearch').SearchEngine
 const updateWebSearch = (patch: Partial<import('../../services/webSearch').WebSearchSettings>) => {
   settings.value.webSearch = { ...settings.value.webSearch, ...patch }
   setSetting('webSearch', settings.value.webSearch)
-}
-
-// 答题增强：答案二次自检开关（写入 app_settings 并同步 config.json）
-const updateAnswerSelfCheck = (patch: Partial<{ enabled: boolean }>) => {
-  settings.value.answerSelfCheck = { ...settings.value.answerSelfCheck, ...patch }
-  setSetting('answerSelfCheck', settings.value.answerSelfCheck)
 }
 
 // 联网搜索测试：用当前配置发起一次真实搜索并显示结果/耗时

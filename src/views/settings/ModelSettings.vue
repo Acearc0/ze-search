@@ -1348,32 +1348,34 @@ const fetchModelsFromPlatform = async () => {
   }
 }
 
-const addFetchedModels = async (ids: string[]) => {
+const addFetchedModels = async (added: { id: string; category: 'text' | 'vision' }[]) => {
   const platform = selectedPlatform.value
   if (!platform) return
   const platformId = platform.id
   let lastId: string | null = null
-  for (const id of ids) {
+  let lastCategory: 'text' | 'vision' = 'text'
+  for (const item of added) {
     lastId = await addModelToPlatform(platformId, {
-      name: id,
-      displayName: id,
+      name: item.id,
+      displayName: item.id,
       maxTokens: 4096,
       temperature: 0.7,
       topP: 1.0,
       enabled: true,
-      modelId: id,
+      modelId: item.id,
       jsCode: '',
-      category: 'text',
+      category: item.category,
       enableThinking: false,
       thinkingOffEnableThinkingFalse: true,
       thinkingOffThinkingTypeDisabled: false,
       thinkingOffResponsesEffort: 'minimal',
       thinkingEffort: 'medium'
     })
+    lastCategory = item.category
   }
   showFetchModelsDialog.value = false
   if (lastId) {
-    await revealModelInList(platformId, lastId, 'text')
+    await revealModelInList(platformId, lastId, lastCategory)
   }
 }
 

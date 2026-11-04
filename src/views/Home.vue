@@ -2032,8 +2032,7 @@ const callModelWithStreaming = async (
   query: string,
   requestId: string,
   onChunk?: (content: string) => void,
-  onReasoning?: (text: string) => void,
-  options?: { toolsDisabled?: boolean }
+  onReasoning?: (text: string) => void
 ) => {
   if (isRequestCancelled(requestId)) {
     throw createCancelledRequestError()
@@ -2080,7 +2079,7 @@ const callModelWithStreaming = async (
 
   // 联网搜索：仅在用户显式开启时注入 web_search 工具；关闭时 tools 保持 []，代码路径与现状完全一致
   const webSearchCfg = appSettings.webSearch
-  if (webSearchCfg?.enabled && !options?.toolsDisabled) {
+  if (webSearchCfg?.enabled) {
     testInput.tools = [WEB_SEARCH_TOOL]
   }
 
@@ -2520,62 +2519,6 @@ watch(globalSelectedModel, (newModel) => {
 }, { immediate: false })
 
 // 单个模型调用，独立日志条目，返回响应文本
-// 从模型响应里提取 answer 字段（容忍代码块包裹与轻微格式偏差）
-const extractAnswerValue = (text: string): string | null => {
-  const cleaned = stripMarkdownCodeBlock(text || '').trim()
-  try {
-    const obj = JSON.parse(cleaned)
-    if (obj && typeof obj.answer === 'string' && obj.answer.trim()) return obj.answer.trim()
-  } catch { /* 非严格 JSON，走正则兜底 */ }
-  const m = /"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text || '')
-  if (!m) return null
-  try {
-    return (JSON.parse(`"${m[1]}"`) as string).trim()
-  } catch {
-    return m[1].trim()
-  }
-}
-
-/**
- * 答案二次自检：同一模型重新独立作答并与首答比对，仅在模型明确给出不同且合法的答案时替换。
- * 自检失败、返回不可解析、或首答本身是错误文本时，一律保留原答案（不影响主流程）。
- */
-const verifyAnswerWithModel = async (
-  model: AIModel,
-  query: string,
-  response: string,
-  logId: string
-): Promise<string> => {
-  const originalAnswer = extractAnswerValue(response)
-  if (!originalAnswer || originalAnswer.startsWith('错误')) return response
-
-  const prompt = `请复核下面这道题的答案。先独立作答，再与「待复核答案」比对。
-
-${query}
-
-待复核答案：${originalAnswer}
-
-只输出一行 JSON：{"answer":"最终答案正文","changed":true|false}
-answer 必须与选项原文一致（去掉 A./B. 等字母前缀），判断题写「正确」或「错误」，多选题用 ### 连接。不要输出任何解释。`
-
-  const verifyText = await callModelWithStreaming(
-    model, prompt, `__verify_${logId}_${Date.now()}`,
-    undefined, undefined, { toolsDisabled: true }
-  )
-  const cleaned = stripMarkdownCodeBlock(verifyText || '').trim()
-  let parsed: any = null
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch {
-    return response
-  }
-  if (!parsed || typeof parsed.answer !== 'string' || !parsed.answer.trim()) return response
-  if (parsed.changed !== true) return response
-
-  const verifiedAnswer = parsed.answer.trim()
-  if (verifiedAnswer === originalAnswer) return response
-  return JSON.stringify({ answer: verifiedAnswer })
-}
 
 const callSingleModelAPI = async (model: AIModel, query: string, logId: string): Promise<string> => {
   const logIndex = requestLogs.value.findIndex(log => log.id === logId)
@@ -2623,20 +2566,6 @@ const callSingleModelAPI = async (model: AIModel, query: string, logId: string):
     if (idx !== -1) requestLogs.value[idx].isModelCalling = false
     clearRequestHeartbeat(logId)
 
-    // 答案二次自检（默认关闭）：多一次同模型复核调用，仅采纳模型明确修正过的答案
-    if (settings.answerSelfCheck?.enabled) {
-      try {
-        const verified = await verifyAnswerWithModel(model, query, response, logId)
-        if (verified !== response) {
-          const cur = requestLogs.value.findIndex(l => l.id === logId)
-          if (cur !== -1) requestLogs.value[cur].modelResponse = verified
-          console.info('🧠 答案二次自检：已修正答案')
-        }
-        return verified
-      } catch (e) {
-        console.warn('答案二次自检失败，保留首答:', e)
-      }
-    }
     return response
   } catch (error) {
     if (isAbortLikeError(error) || isRequestCancelled(logId)) {
