@@ -125,7 +125,7 @@ LLM 调用链全部在前端，核心是 `modelProtocol.ts`：
 | 文件 | 作用 |
 |---|---|
 | `src/views/Home.vue` | 首页答题逻辑核心，含多模型调度、懒投票、工具循环 |
-| `src/services/modelProtocol.ts` | LLM 协议模板生成、URL 拼接、thinking 负载 |
+| `src/services/modelProtocol.ts` | LLM 协议模板生成、URL 拼接、thinking 负载、**按模型族的参数约束表**（见 7.7） |
 | `src/services/modelConfig.ts` | 模型/平台配置 store，远程同步，增删改查 |
 | `src/services/settings.ts` | 应用设置（含 webSearch、answerLazyVote、arbitrationModelId） |
 | `src/services/webSearch.ts` | 6 免费搜索引擎 + 工具 schema |
@@ -160,10 +160,12 @@ CI 配置：`.github/workflows/build-windows.yml`，使用 npm cache + rust cach
 ```bash
 npx vue-tsc --noEmit                 # 类型检查，目标 0 错误（2026-11-04 复核：0 错误）
 node tests/webSearch.test.ts         # 搜索单测 9/9 通过（推荐写法：直接把测试文件当入口执行）
-node --test tests/webSearch.test.ts  # 常规写法，本地完整权限下同样通过
+node tests/modelProtocol.test.ts     # 模型参数约束单测 17/17（见 7.7）
+node --test tests/                   # 常规写法（一次跑全部测试文件），本地完整权限下可用
 ```
-> **受限环境请用第一种写法**：`node --test` 需要 node 再 spawn 一个子进程跑测试文件，在沙箱/受限权限下会直接失败并报 `errno -4048, code EPERM, syscall spawn`（与六、3 提到的 git 误报是两类问题）。直跑单个测试文件可绕开，Node 24 会原生剥离 TS 类型。
-> 另：其中两个 `executeWebSearchToolCall` 用例各耗时约 9 秒，是引擎重试退避计时，不是真实网络请求。
+> **受限环境请用直跑单文件的写法**：`node --test` 需要 node 再 spawn 一个子进程跑测试文件，在沙箱/受限权限下会直接失败并报 `errno -4048, code EPERM, syscall spawn`（与六、3 提到的 git 误报是两类问题）。直跑单个测试文件可绕开，Node 24 会原生剥离 TS 类型。
+> 另：`webSearch.test.ts` 中两个 `executeWebSearchToolCall` 用例各耗时约 9 秒，是引擎重试退避计时，不是真实网络请求。
+
 
 ## 六、Git 协作规则
 
@@ -184,6 +186,7 @@ node --test tests/webSearch.test.ts  # 常规写法，本地完整权限下同�
   2. 拉取的模型继承了错误的协议（如 anthropic）→ 已修复（默认 openai-chat）
 - **排查**：确认模型的 `apiProtocol` 为 `openai-chat`，Base URL 带不带 `/v1` 都行
 - **修复**：删掉旧的拉取模型，重新拉取
+- **同类问题**：参数取值不匹配（400）见 7.7，机制与修复思路相同——都是「拉来的模型套用了通用默认值，而厂商有自己的白名单」
 
 ### 7.2 模型重复
 - 已修复：`addModelToPlatform` 按 `modelId` 去重；加载时 `dedupeByRuntimeModelId` 自动清理
@@ -221,6 +224,33 @@ node --test tests/webSearch.test.ts  # 常规写法，本地完整权限下同�
   - 不建议 QuickJS-wasm / iframe 沙箱化并保留热更新——本 fork 不需要上游热更，代价大于收益。
   - 落地时注意两点：把模块级 `g` 正则使用前重置 `lastIndex`（异常会残留游标导致漏匹配）；重写后用真实题库文本做新旧算法逐条输出 diff，用"没变差"的实测代替口头保证。
 
+### 7.7 拉取的模型报 400：参数取值不在厂商白名单内（已修复 `c655287`）
+
+- **症状**：设置里「测试模型」或答题时报 `HTTP 400 Bad Request`，弹窗显示「代码执行错误」。两例实测：
+  - `glm-5.3` → `invalid_parameter_error: 'reasoning_effort' must be one of 'low', 'high', 'max'`
+  - `kimi-k3` → `Parameter 'temperature'=0.7 is not supported for kimi-k3 model.`
+- **根因**：本项目对所有模型套用同一组默认值（`temperature: 0.7`、`topP: 1.0`、`thinkingEffort: 'medium'`，见 `ModelSettings.vue` 新建/拉取处与 `modelConfig.ts` 同步处），而部分厂商对同一批 OpenAI 兼容参数是**固定取值或收窄词表，传非法值直接 400 而非忽略**。且 `temperature`/`top_p` 在模型编辑弹窗里**没有输入框**，用户无法自行绕过。
+- **各家取值差异（已核对官方文档）**：
+
+  | 模型 | `reasoning_effort` | `temperature` | `top_p` | 可否关闭思考 |
+  |---|---|---|---|---|
+  | GLM-5.3 / Flash / FlashX | 仅 `low`/`high`/`max`（默认 max） | 官方参数表未列约束 | 同左 | 不可（`thinking.type: disabled` 报错） |
+  | GLM-5.2 | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`（low、medium 内部映射为 high） | 官方参数表未列约束 | 同左 | 可 |
+  | Kimi K3 / K3.1 Pro | 仅 `low`/`high`/`max`（默认 max） | 固定 `1.0` | 固定 `0.95` | 不可（始终推理） |
+  | Kimi K2.7 Code | 不支持该字段 | 固定 `1.0` | 固定 `0.95` | 不可 |
+  | Kimi K2.6 | 不支持该字段 | 思考 `1.0` / 非思考 `0.6` | 固定 `0.95` | 可 |
+
+  依据：`https://docs.bigmodel.cn/cn/guide/capabilities/thinking`、`https://platform.kimi.com/docs/api/models-overview`（官方明确"固定"参数**建议不要显式传入**）。
+- **修复方式**：`modelProtocol.ts` 新增按 `modelId` 命中的约束表 `resolveModelParamConstraints()` + 档位映射 `mapEffortToVocab()`，在**生成调用代码时（构建期）**裁剪或映射参数，三个协议模板（chat / responses / anthropic）统一生效：
+  - `omitTemperature` / `omitTopP` → 字段整个不发（而非改值，符合官方建议；省略后由厂商用默认值）
+  - `effortVocab` → 把用户选的强度映射进合法档位，映射语义沿用智谱官方（`medium→high`、`minimal/none→low`、`xhigh→max`）
+  - `dropReasoningEffort` → 该模型不支持就完全不发
+  - `forbidDisableThinking` → 不发任何"关闭思考"参数
+  - `modelId` 归一化后匹配，兼容 `moonshot/kimi-k3`、`kimi-k3:free`、`Pro/zai-org/GLM-5.3` 等带前后缀写法；**未收录的模型行为完全不变**。
+- **UI 配套**：`ModelConfigDialog.vue` 的思考强度按钮按词表过滤，切换模型 ID 后自动纠正非法档位并提示；不支持关闭思考的模型在"关闭思考"面板给出说明并禁用无效选项。
+- **新增模型时怎么加**：往 `MODEL_PARAM_RULES` 追加一条 `{ test: /^…$/i, constraints: {...} }`，并在 `tests/modelProtocol.test.ts` 补一条断言真实请求体的用例。该表只做"少发/改档"，不会凭空加参数，因此对转发/代理端点同样安全。
+- **回归测试**：`node tests/modelProtocol.test.ts`（17/17）。用例直接执行生成的调用代码并用 mock fetch 断言请求体，覆盖两次报错、未命中模型零变更、三个协议、档位映射与 modelId 归一化。
+
 ## 八、后续维护建议
 
 1. **联网搜索质量**：引擎可能因反爬失效，关注 `webSearch.ts` 的回退链
@@ -243,7 +273,9 @@ node --test tests/webSearch.test.ts  # 常规写法，本地完整权限下同�
 | `97f2d21` | 移除远程模型目录、自动更新与版本检查（去外部依赖） |
 | `5812be2` | 更新交接文档：补充去外部依赖化、对外接口一览与提交历史 |
 | `f2a693f` | 删除 capabilities 残留的 `updater:default` 权限（修复 CI 构建失败） |
+| `3e7e644` | 交接文档对照代码复核：更正去外部依赖化表述，新增 3.8.1 与 7.6 |
+| `c655287` | 按模型族约束请求参数，修复 kimi-k3 / glm-5.3 报 400（新增参数约束表与 17 个单测） |
 
-> 推送状态：以 `git status` / `git log origin/master..master` 为准（本仓库按六、2 的规则先本地提交，说「上传」才 push）。2026-11-04 复核时 `97f2d21` 之后尚无未推送提交；原「`97f2d21` 已提交本地、尚未推送」一句已过时，故删除。
+> 推送状态：以 `git status` / `git log origin/master..master` 为准（本仓库按六、2 的规则先本地提交，说「上传」才 push）。原「`97f2d21` 已提交本地、尚未推送」一句已过时，故删除。
 >
 > 另注：`docs/auto-update.md` 讲述 Tauri Updater 发布流程，而本 fork 已在 `97f2d21` 移除 `plugins.updater` 配置与 `tauri-plugin-updater` 依赖，该文只对**原版**适用，勿按其中地址改 `tauri.conf.json`。
