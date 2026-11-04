@@ -357,29 +357,6 @@
   --dialog-button-close-hover-bg: #e1e4e8;
   --dialog-button-close-hover-text: #24292e;
 
-  /* UpdateDialog 颜色变量 */
-  --update-dialog-header-icon-bg: #fafafa;
-  --update-dialog-header-icon-border: #e5e7eb;
-  --update-dialog-header-icon-color: #f59e0b;
-  --update-dialog-close-btn-bg: transparent;
-  --update-dialog-close-btn-text: #6b7280;
-  --update-dialog-close-btn-hover-bg: #f3f4f6;
-  --update-dialog-close-btn-hover-text: #1f2937;
-  --update-dialog-neutral-btn-bg: #e6e6e6;
-  --update-dialog-neutral-btn-text: #4b5563;
-  --update-dialog-neutral-btn-border: transparent;
-  --update-dialog-neutral-btn-hover-bg: #ebebeb;
-  --update-dialog-neutral-btn-hover-text: #1f2937;
-  --update-dialog-neutral-btn-hover-border: #c7c7c7;
-  --update-dialog-neutral-btn-focus-border: #9ca3af;
-  --update-dialog-secondary-btn-bg: rgba(245, 158, 11, 0.1);
-  --update-dialog-secondary-btn-text: #c2410c;
-  --update-dialog-secondary-btn-border: rgba(245, 158, 11, 0.22);
-  --update-dialog-secondary-btn-hover-bg: rgba(245, 158, 11, 0.16);
-  --update-dialog-secondary-btn-hover-text: #9a3412;
-  --update-dialog-secondary-btn-hover-border: rgba(245, 158, 11, 0.34);
-  --update-dialog-secondary-btn-focus-border: rgba(245, 158, 11, 0.4);
-
   /* 平台配置对话框相关颜色 */
   --platform-config-dialog-bg: #ffffff;
   --platform-config-overlay-bg: rgba(0, 0, 0, 0.5);
@@ -831,29 +808,6 @@
   --dialog-button-close-text: #a0aec0;
   --dialog-button-close-hover-bg: #4a5568;
   --dialog-button-close-hover-text: #e2e8f0;
-
-  /* UpdateDialog 颜色变量（深色模式） */
-  --update-dialog-header-icon-bg: #4a4a4a;
-  --update-dialog-header-icon-border: #52525b;
-  --update-dialog-header-icon-color: #fbbf24;
-  --update-dialog-close-btn-bg: transparent;
-  --update-dialog-close-btn-text: #9ca3af;
-  --update-dialog-close-btn-hover-bg: #374151;
-  --update-dialog-close-btn-hover-text: #f3f4f6;
-  --update-dialog-neutral-btn-bg: #4a4a4a;
-  --update-dialog-neutral-btn-text: #d4d4d8;
-  --update-dialog-neutral-btn-border: transparent;
-  --update-dialog-neutral-btn-hover-bg: #525252;
-  --update-dialog-neutral-btn-hover-text: #fafafa;
-  --update-dialog-neutral-btn-hover-border: #71717a;
-  --update-dialog-neutral-btn-focus-border: #71717a;
-  --update-dialog-secondary-btn-bg: rgba(245, 158, 11, 0.14);
-  --update-dialog-secondary-btn-text: #fbbf24;
-  --update-dialog-secondary-btn-border: rgba(245, 158, 11, 0.28);
-  --update-dialog-secondary-btn-hover-bg: rgba(245, 158, 11, 0.22);
-  --update-dialog-secondary-btn-hover-text: #fde68a;
-  --update-dialog-secondary-btn-hover-border: rgba(251, 191, 36, 0.44);
-  --update-dialog-secondary-btn-focus-border: rgba(251, 191, 36, 0.5);
 
   /* QuestionEditor 专用颜色变量（深色模式） */
   --question-editor-overlay-bg: rgba(0, 0, 0, 0.7);

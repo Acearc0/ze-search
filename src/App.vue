@@ -3,7 +3,6 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import AppHeader from "./views/AppHeader.vue";
 import Sidebar from "./views/Sidebar.vue";
-import UpdateDialog from "./components/UpdateDialog.vue";
 import Home from "./views/Home.vue";
 import Settings from "./views/Settings.vue";
 import QuestionBank from "./views/QuestionBank.vue";
@@ -11,7 +10,6 @@ import FileTree from "./views/questions/FileTree.vue";
 import { databaseService } from "./services/database";
 import { initializationService } from "./services/initialization";
 import { initGlobalTheme } from "./composables/useTheme";
-import { useAppUpdate } from "./composables/useAppUpdate";
 import { useExclusiveMenu } from "./composables/useExclusiveMenu";
 
 // 当前活跃的页面
@@ -20,20 +18,6 @@ const activeTab = ref('home');
 const collapseTrigger = ref(0);
 const questionBankFocusFolderId = ref<number | null>(null);
 const questionBankFocusRequestKey = ref(0);
-
-const {
-  showUpdateDialog,
-  updateInfo,
-  currentVersion,
-  downloadFileName,
-  downloadUrl,
-  nativeUpdater,
-  checkForUpdates,
-  closeDialog: handleUpdateDialogClose,
-  handleDialogDownload,
-  handleLater,
-  handleWeekLater,
-} = useAppUpdate();
 
 // 暴露到全局 window，供开发者控制台调试
 onMounted(() => {
@@ -358,8 +342,6 @@ onMounted(async () => {
     console.log('主题系统初始化完成');
     await initializationService.initialize();
     console.log('应用初始化完成');
-    
-    await checkForUpdates();
   } catch (error) {
     console.error('应用初始化失败:', error);
   }
@@ -411,19 +393,6 @@ onUnmounted(() => {
       </div>
     </div>
     
-    <!-- 版本更新对话框 -->
-    <UpdateDialog
-      :visible="showUpdateDialog"
-      :version-info="updateInfo"
-      :current-version="currentVersion"
-      :download-file-name="downloadFileName"
-      :download-url="downloadUrl"
-      :native-updater="nativeUpdater"
-      @close="handleUpdateDialogClose"
-      @download="handleDialogDownload"
-      @later="handleLater"
-      @week-later="handleWeekLater"
-    />
   </div>
 
   <div v-if="showImportDialog" class="modal" @click="closeImportDialog">

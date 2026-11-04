@@ -23,7 +23,8 @@ export class InitializationService {
     try {
       console.log('开始应用初始化...');
 
-      await modelConfigManager.syncRemotePlatforms();
+      // 已移除远程模型目录同步：不再依赖外部服务器下发预设平台/模型
+      // 所有模型由用户手动添加或通过平台「拉取模型」功能获取
 
       // 数据库初始化已移至后端 (Rust) 在启动时自动完成
 

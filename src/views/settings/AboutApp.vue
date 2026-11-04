@@ -11,12 +11,6 @@
           <p class="app-version">版本 {{ currentVersion }}</p>
           <p class="app-description">支持OCS的AI题库</p>
         </div>
-        <div class="app-actions">
-          <span v-if="updateStatus" class="update-status" :class="updateStatusType">{{ updateStatus }}</span>
-          <button class="link-btn" :disabled="isCheckingUpdate" @click="checkForUpdatesManually">
-            {{ isCheckingUpdate ? '检查中...' : '检查更新' }}
-          </button>
-        </div>
       </div>
     </div>
 
@@ -200,7 +194,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 type CSSProperties = Record<string, string>
 import { environmentDetector } from '../../services/environmentDetector'
-import { useAppUpdate } from '../../composables/useAppUpdate'
+import { getVersion } from '@tauri-apps/api/app'
+
+const currentVersion = ref('')
 
 
 interface HeatmapRenderCell {
@@ -229,16 +225,6 @@ const debugInfo = ref({
   environmentType: 'browser' as 'tauri' | 'browser',
   availableApis: [] as string[]
 })
-
-const {
-  updateInfo,
-  currentVersion,
-  checkForUpdates,
-} = useAppUpdate()
-
-const isCheckingUpdate = ref(false)
-const updateStatus = ref('')
-const updateStatusType = ref<'success' | 'error' | ''>('')
 
 const isLoadingRequestStats = ref(false)
 const requestStatsError = ref('')
@@ -633,6 +619,7 @@ const heatmapMonthMarkers = computed<HeatmapMonthMarker[]>(() => {
 
 
 onMounted(() => {
+  getVersion().then(v => { currentVersion.value = v }).catch(() => { currentVersion.value = '2.2.7' })
   checkEnvironment()
   syncThemeState()
   scheduleHeatmapContainerWidthSync()
@@ -689,37 +676,6 @@ const formatDateLabel = (dateKey: string) => {
     month: '2-digit',
     day: '2-digit'
   })
-}
-
-
-const checkForUpdatesManually = async () => {
-  if (isCheckingUpdate.value) {
-    return
-  }
-
-  isCheckingUpdate.value = true
-  updateStatus.value = ''
-  updateStatusType.value = ''
-
-  try {
-    // 走统一更新流：弹窗 + 顶部进度条 + 自动下载
-    await checkForUpdates({ forceDialog: true })
-
-    if (updateInfo.value?.version) {
-      updateStatus.value = `发现新版本 ${updateInfo.value.version}`
-      updateStatusType.value = 'success'
-      return
-    }
-
-    updateStatus.value = '当前已是最新版本'
-    updateStatusType.value = 'success'
-  } catch (error) {
-    console.error('手动检查更新失败:', error)
-    updateStatus.value = '检查更新失败，请稍后重试'
-    updateStatusType.value = 'error'
-  } finally {
-    isCheckingUpdate.value = false
-  }
 }
 
 const openDebugPanel = async () => {
