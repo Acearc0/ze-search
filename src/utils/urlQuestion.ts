@@ -271,6 +271,10 @@ export const buildUrlQuestionPromptParts = (
   if (mode === 'multiple' && hasOptions) {
     answerRule = `- 这是多选题：必须列出全部正确选项编号，多个编号用空格分隔，如 ANSWER: 1 3\n- 也可以写成 ANSWER: A C（字母对应下方选项顺序）\n- 不要只选一个；禁止输出空答案或仅空格`
   } else if (mode === 'judgement') {
+    // 注意：此路径的 optionsText 对 judgement 恒为空（isChoiceUrlQuestionMode 不含 judgement，
+    // 且无标签的「对/错」不会被 optionMap 收下），所以指令里不能引用「下方选项」，
+    // 否则会让模型跟随一个不存在的列表。判断题答案与选项原文的字面差异由
+    // buildAnswerCompareKey 的判断词归一兜底（见 utils/judgementAnswer.ts）。
     answerRule = `- 判断题：写 正确 或 错误\n- 格式如 ANSWER: 正确`
   } else if (mode === 'single' && hasOptions) {
     answerRule = `- 单选题：只写一个正确选项编号，如 ANSWER: 2；不要根据原始文本的空行号作答\n- 也可以写成 ANSWER: B（字母对应下方选项顺序）\n- 禁止输出空答案或仅空格`

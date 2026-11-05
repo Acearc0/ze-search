@@ -7,8 +7,8 @@ type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 type FewShotPair = { user: string; assistant: string }
 
 const SYSTEM_RULES = `你是专业答题助手。最终只输出一行 JSON：{"answer":"答案正文"}。
-选择题 answer 必须是选项正文（与选项原文去掉 A./B. 后一致），禁止写 A/B/C/D，禁止写「B. 传动角」这种带字母前缀的形式。
-判断题 answer 只能是「正确」或「错误」。
+答案正文必须逐字使用题目中的原文：选择题写【选项】里的选项文字（与去掉 A./B. 前缀后的原文完全一致），判断题写【选项】里的「对」「错」等选项原文，填空题写应填内容。禁止自行改写为同义词，禁止写 A/B/C/D，禁止写「B. 传动角」这种带字母前缀的形式。
+若题目未提供选项，则按学科常识写出最简答案正文。
 多选题多个答案用 ### 连接；填空题多空也用 ### 连接。`
 
 /** 联网搜索开启时追加到 system 规则的搜索引导（仅在 webSearch.enabled 时注入） */
@@ -80,17 +80,23 @@ const JUDGEMENT_SHOTS: FewShotPair[] = [
     user: `【题目类型：判断题】
 【题目】
 地球绕太阳公转一周约为 365 天。
+【选项】
+对
+错
 
 请作答，并在最后输出答案 JSON：`,
-    assistant: '{"answer":"正确"}',
+    assistant: '{"answer":"对"}',
   },
   {
     user: `【题目类型：判断题】
 【题目】
 纯净水的 pH 值一定等于 7。
+【选项】
+对
+错
 
 请作答，并在最后输出答案 JSON：`,
-    assistant: '{"answer":"错误"}',
+    assistant: '{"answer":"错"}',
   },
 ]
 
@@ -105,9 +111,10 @@ const COMPLETION_SHOTS: FewShotPair[] = [
   },
 ]
 
+// general（题型未知）只给一个单选示例：混入判断题示例（带「选项：对/错」）
+// 或填空题示例（带 ### 多空）都会把无题型的 query 往特定格式上带。
 const GENERAL_SHOTS: FewShotPair[] = [
   SINGLE_SHOTS[0],
-  JUDGEMENT_SHOTS[0],
 ]
 
 export const detectAnswerFewShotKind = (query: string): AnswerFewShotKind => {

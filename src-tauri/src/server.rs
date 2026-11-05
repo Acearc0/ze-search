@@ -180,7 +180,7 @@ impl QuestionKind {
                 "这是多选题，可能有多个正确答案。answer 只写各正确选项的完整文字，用 ### 连接（顺序不限）。禁止写 ABD，禁止写「A. xxx###C. yyy」这种带字母前缀的形式。"
             }
             QuestionKind::Judgement => {
-                "这是判断题。answer 只能是「正确」或「错误」二字之一。禁止写 A/B，禁止写「A. 正确」。"
+                "这是判断题。answer 必须逐字使用【选项】中的选项原文（如「对」「错」「正确」「错误」），题目给了什么就写什么，禁止自行换成同义词。若未提供选项，则按常识写最简答案。禁止写 A/B，禁止写「A. 正确」。"
             }
             QuestionKind::Completion => {
                 "这是填空题。answer 只填空白处应填的内容本身；若有多个空，用 ### 连接。不要加第1空/①/A. 等序号前缀。"
@@ -208,8 +208,9 @@ impl QuestionKind {
             QuestionKind::Judgement => {
                 "【作答示例】\n\
 题目：地球绕太阳公转一周约为 365 天。\n\
-正确输出：{\"answer\": \"正确\"}\n\
-错误输出：{\"answer\": \"A\"} 或 {\"answer\": \"A. 正确\"}\n"
+选项：对 / 错\n\
+正确输出：{\"answer\": \"对\"}\n\
+错误输出：{\"answer\": \"正确\"}（同义改写，不是选项原文）、{\"answer\": \"A\"}、{\"answer\": \"A. 对\"}\n"
             }
             QuestionKind::Completion => {
                 "【作答示例】\n\
@@ -261,7 +262,7 @@ fn build_model_query_prompt(
     q.push_str("1. 先在内部完成审题与推理（可简要），再给出最终答案。\n");
     q.push_str("2. 最后一行输出**唯一**一个 JSON 对象，不要用 markdown 代码块包裹，JSON 前后不要附加说明。\n");
     q.push_str("3. JSON 格式严格为：{\"answer\": \"最终答案\"}\n");
-    q.push_str("4. answer 只写答案正文本身：选择题必须与【选项】中去掉「A.」「B.」后的文字完全一致；判断题只写「正确」或「错误」；填空题只写填空内容。\n");
+    q.push_str("4. answer 只写答案正文本身，且必须逐字取自题目原文：选择题与【选项】中去掉「A.」「B.」后的文字完全一致；判断题写【选项】里的「对」「错」等原文（题目给什么就写什么，禁止自行换成「正确/错误」等同义词）；填空题只写填空内容。题目未提供选项时按常识写最简答案。\n");
     q.push_str("5. 严禁把选项字母写进 answer：不要写 A/B/C/D，不要写「B. 传动角」「D. meeting」，应直接写「传动角」「meeting」。不要把分析过程写进 answer。\n\n");
 
     if let Some(raw_type) = query_type.map(str::trim).filter(|value| !value.is_empty()) {

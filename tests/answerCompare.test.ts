@@ -100,3 +100,33 @@ test('answer 与整段正文两条路径都能比对（无 JSON 时回退整段�
   assert.ok(isSameAnswer('就是 VARCHAR', '就是 VARCHAR '))
   assert.equal(buildAnswerCompareKey('就是 VARCHAR '), buildAnswerCompareKey('就是 varchar'))
 })
+
+// ---------- 判断题同义词（题库选项是「对/错」，旧指令要求「正确/错误」） ----------
+
+test('回归：两个判断题模型分别输出「对」与「正确」应判等，不触发第三模型', () => {
+  const a = '{"answer": "对"}'
+  const b = '{"answer":"正确"}'
+  assert.ok(isSameAnswer(a, b))
+})
+
+test('判断题：「错」与「错误」判等；但真/假两方绝不混淆', () => {
+  assert.ok(isSameAnswer('{"answer":"错"}', '{"answer": "错误"}'))
+  assert.ok(!isSameAnswer('{"answer":"对"}', '{"answer":"错"}'))
+  assert.ok(!isSameAnswer('{"answer":"正确"}', '{"answer":"错误"}'))
+  assert.ok(!isSameAnswer('{"answer":"对"}', '{"answer":"错误"}'))
+})
+
+test('判断题：全半角 / 大小写 / 空白差异一并归一', () => {
+  assert.ok(isSameAnswer('{"answer":" 对 "}', '{"answer":"正确"}'))
+  assert.ok(isSameAnswer('{"answer":"TRUE"}', '{"answer":"对"}'))
+  assert.ok(isSameAnswer('{"answer":"√"}', '{"answer":"正确"}'))
+  assert.ok(isSameAnswer('{"answer":"×"}', '{"answer":"错误"}'))
+})
+
+test('护栏：普通答案里含「对/错/正确/错误」字样不被误归一', () => {
+  // 整串相等才归一，包含匹配会误伤这些
+  assert.ok(!isSameAnswer('{"answer":"对象存储"}', '{"answer":"正确"}'))
+  assert.ok(!isSameAnswer('{"answer":"错误码"}', '{"answer":"错"}'))
+  assert.ok(!isSameAnswer('{"answer":"对，是"}', '{"answer":"正确"}'))
+  assert.ok(!isSameAnswer('{"answer":"Y"}', '{"answer":"正确"}'), '单字母 Y 不得被当成「正确」')
+})

@@ -8,9 +8,16 @@
  * 两者都会让「答案其实一致」被判成不一致，导致懒投票失效（多调一次模型）
  * 并把多数票拆散成平票。因此比较前统一提取 answer 字段再做归一化。
  *
+ * 第三类漂移：判断题同义词。题库选项是「对/错」，旧指令却要求「正确/错误」，
+ * 两个模型各按一套输出时字面不等，同样会误触发第三模型，
+ * 故比较键额外做判断题同义归一（见 judgementAnswer.ts）。
+ *
  * 注意：本模块只用于「判定是否一致」，不用于生成展示/下发给后端的文本，
  * 所以归一化可以激进（去空白、全半角、大小写统一）而不影响输出格式。
  */
+
+// 显式 .ts 扩展名：本文件会被 node 直跑的单测加载（tsconfig 已开 allowImportingTsExtensions）
+import { canonicalJudgementAnswer } from './judgementAnswer.ts'
 
 /** 与 Home.vue 展示层一致：去除 markdown 代码块包裹（内部使用，展示层仍用自己的实现） */
 const stripMarkdownCodeBlock = (content: string): string => {
@@ -131,7 +138,8 @@ export const stripSourceCitation = (answer: string): string => {
 
 /**
  * 生成用于「是否一致」判定的比较键：
- * 优先取 answer 字段，取不到则退回整段正文；再剥离来源、统一去空白/全半角/大小写。
+ * 优先取 answer 字段，取不到则退回整段正文；再剥离来源、归一判断题同义词、
+ * 统一去空白/全半角/大小写。
  * 返回空串表示无可用内容（调用方按「不一致」处理，避免把空响应当成一致）。
  */
 export const buildAnswerCompareKey = (content: string): string => {
@@ -149,7 +157,13 @@ export const buildAnswerCompareKey = (content: string): string => {
   const base = stripSourceCitation(answer || fallback)
   if (!base) return ''
 
-  return toHalfwidth(base).replace(/\s+/g, '').toLowerCase()
+  // 先做形状归一（全半角、去空白、小写），再按归一后的整串匹配判断词：
+  // judgementAnswer 约定接收已归一的输入，故「 TRUE 」「√」这类也能命中。
+  const shaped = toHalfwidth(base).replace(/\s+/g, '').toLowerCase()
+
+  // 判断题同义归一：题库选项是「对/错」而旧指令要求「正确/错误」，
+  // 两个模型各按一套输出时字面不等会误触发第三模型（存量脏数据兜底）。
+  return canonicalJudgementAnswer(shaped)
 }
 
 /**
