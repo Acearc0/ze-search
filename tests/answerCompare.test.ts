@@ -76,7 +76,7 @@ test('判断题正反结论不得混淆', () => {
   assert.ok(!isSameAnswer('{"answer":"正确"}', '{"answer":"错误"}'))
 })
 
-test('多选题顺序不同视为不同答案', () => {
+test('未声明 unordered 时多选顺序仍敏感（默认保守，见下方 unordered 用例）', () => {
   assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"鼠标###键盘"}'))
 })
 
@@ -148,4 +148,54 @@ test('刻意不收 1/0/T/F/X：填空题答案恰好是这些时不得被当成�
   assert.ok(!isSameAnswer('{"answer":"T"}', '{"answer":"正确"}'))
   assert.ok(!isSameAnswer('{"answer":"F"}', '{"answer":"错误"}'))
   assert.ok(!isSameAnswer('{"answer":"X"}', '{"answer":"错误"}'))
+})
+
+// ---------- 选项字母前缀：与发给 OCS 的口径保持一致 ----------
+
+const SINGLE_OPTIONS = 'A. 压力角\nB. 传动角\nC. 极力夹角'
+
+test('带选项表时剥离字母前缀：「B. 传动角」与「传动角」判等（此前误判触发仲裁）', () => {
+  const opts = { options: SINGLE_OPTIONS }
+  assert.ok(isSameAnswer('{"answer":"传动角"}', '{"answer":"B. 传动角"}', opts))
+  assert.ok(isSameAnswer('{"answer":"传动角"}', '{"answer":"B、传动角"}', opts), '顿号前缀同样剥离')
+  assert.ok(isSameAnswer('{"answer":"传动角"}', '{"answer":"B) 传动角"}', opts))
+})
+
+test('前缀剥离不影响不同答案的区分', () => {
+  const opts = { options: SINGLE_OPTIONS }
+  assert.ok(!isSameAnswer('{"answer":"B. 传动角"}', '{"answer":"A. 压力角"}', opts))
+})
+
+test('无选项表时仍剥离空格形式的字母前缀（与输出规范化同规则）', () => {
+  assert.ok(isSameAnswer('{"answer":"传动角"}', '{"answer":"B. 传动角"}'))
+})
+
+test('字母前缀护栏：纯字母答案不得被当成前缀剥离（留给字母映射）', () => {
+  const opts = { options: SINGLE_OPTIONS }
+  // 「B」是合法的字母答案形式，不能被剥成空；与「传动角」不应判等
+  assert.ok(!isSameAnswer('{"answer":"B"}', '{"answer":"传动角"}', opts))
+})
+
+// ---------- ### 片段顺序：多选无关，填空有语义 ----------
+
+test('多选题：### 片段顺序无关，判等（OCS 逐片段独立匹配选项）', () => {
+  const opts = { unordered: true }
+  assert.ok(isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"鼠标###键盘"}', opts))
+  assert.ok(isSameAnswer('{"answer":"A. 键盘###C. 鼠标"}', '{"answer":"鼠标###键盘"}', { ...opts, options: 'A. 键盘\nB. 显示器\nC. 鼠标' }))
+})
+
+test('填空题护栏：片段按空位索引对应，顺序不同绝不能判等', () => {
+  // 北京###上海 与 上海###北京 是不同答案（第一空/第二空）
+  assert.ok(!isSameAnswer('{"answer":"北京###上海"}', '{"answer":"上海###北京"}'))
+  assert.ok(!isSameAnswer('{"answer":"北京###上海"}', '{"answer":"上海###北京"}', { unordered: false }))
+})
+
+test('题型未知时默认顺序敏感（保守：宁可多调一次模型，不可误判一致）', () => {
+  assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"鼠标###键盘"}'))
+})
+
+test('多选排序不影响不同答案集合的区分', () => {
+  const opts = { unordered: true }
+  assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"键盘###显示器"}', opts))
+  assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"键盘"}', opts), '少选一个不得判等')
 })

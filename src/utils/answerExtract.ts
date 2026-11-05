@@ -18,6 +18,7 @@
 
 // 显式 .ts 扩展名：本文件会被 node 直跑的单测加载（tsconfig 已开 allowImportingTsExtensions）
 import { canonicalJudgementAnswer } from './judgementAnswer.ts'
+import { parseOptionLetterMap, stripLeadingOptionLabel } from './optionLabels.ts'
 
 /** 与 Home.vue 展示层一致：去除 markdown 代码块包裹（内部使用，展示层仍用自己的实现） */
 const stripMarkdownCodeBlock = (content: string): string => {
@@ -138,11 +139,19 @@ export const stripSourceCitation = (answer: string): string => {
 
 /**
  * 生成用于「是否一致」判定的比较键：
- * 优先取 answer 字段，取不到则退回整段正文；再剥离来源、归一判断题同义词、
- * 统一去空白/全半角/大小写。
+ * 优先取 answer 字段，取不到则退回整段正文；再剥离来源、剥离选项字母前缀、
+ * 归一判断题同义词、统一去空白/全半角/大小写。
  * 返回空串表示无可用内容（调用方按「不一致」处理，避免把空响应当成一致）。
+ *
+ * @param options   题目选项原文，用于安全剥离 `B. xxx` 前缀（与输出规范化同一依据）
+ * @param unordered 答案的 ### 片段是否与顺序无关（多选题是，填空题不是）。
+ *                  依据 OCS 源码：resolveMultiple 逐片段独立匹配选项，顺序无关；
+ *                  resolveCompletion 按索引对应空位，顺序有语义，故不能无条件排序。
  */
-export const buildAnswerCompareKey = (content: string): string => {
+export const buildAnswerCompareKey = (
+  content: string,
+  opts?: { options?: string | null; unordered?: boolean }
+): string => {
   const raw = (content || '')
   const answer = extractAnswerFromMixedContent(raw)
   const fallback = stripMarkdownCodeBlock(raw).trim()
@@ -154,8 +163,22 @@ export const buildAnswerCompareKey = (content: string): string => {
 
   // 剥离来源：否则「带来源」与「不带来源」的同一答案会被判为不一致，
   // 白白触发仲裁模型（与 123dcae 修的是同一类误判）。
-  const base = stripSourceCitation(answer || fallback)
+  let base = stripSourceCitation(answer || fallback)
   if (!base) return ''
+
+  // 剥离选项字母前缀：模型常违反「禁止写 B. 传动角」的指令。
+  // 必须与发给 OCS 的口径一致——normalizeAnswerAgainstOptions 会剥掉前缀，
+  // 若比较键不剥，同一答案会出现「输出干净、判等却不同」的不对称误判。
+  const optionMap = parseOptionLetterMap(opts?.options)
+  const segments = base.split('###').map((s) => s.trim()).filter(Boolean)
+  if (segments.length > 1) {
+    const stripped = segments.map((s) => stripLeadingOptionLabel(s, optionMap))
+    // 多选题：OCS resolveMultiple 逐片段独立匹配选项，勾选结果与顺序无关 → 排序后比较
+    // 填空题：片段按空位索引对应，顺序有语义 → 保持原顺序
+    base = (opts?.unordered ? [...stripped].sort() : stripped).join('###')
+  } else {
+    base = stripLeadingOptionLabel(base, optionMap)
+  }
 
   // 先做形状归一（全半角、去空白、小写），再按归一后的整串匹配判断词：
   // judgementAnswer 约定接收已归一的输入，故「 TRUE 」「√」这类也能命中。
@@ -169,9 +192,14 @@ export const buildAnswerCompareKey = (content: string): string => {
 /**
  * 判断两份模型响应是否为同一答案。
  * 任一方无有效内容时一律判为不一致，防止空响应/报错文本被当成「答案一致」。
+ * opts 与 buildAnswerCompareKey 一致（选项原文、### 片段是否顺序无关）。
  */
-export const isSameAnswer = (a: string, b: string): boolean => {
-  const ka = buildAnswerCompareKey(a)
-  const kb = buildAnswerCompareKey(b)
+export const isSameAnswer = (
+  a: string,
+  b: string,
+  opts?: { options?: string | null; unordered?: boolean }
+): boolean => {
+  const ka = buildAnswerCompareKey(a, opts)
+  const kb = buildAnswerCompareKey(b, opts)
   return !!ka && !!kb && ka === kb
 }

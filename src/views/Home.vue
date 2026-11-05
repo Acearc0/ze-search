@@ -1964,16 +1964,18 @@ const formatModelOutputs = (
 
 // 比较键：先提取 answer 字段再归一化（去空白/全半角/大小写），
 // 避免「解释段落 + JSON 风格差异」把答案一致的模型误判为不一致（见 utils/answerExtract.ts）
-const normalizeAnswerForComparison = (content: string): string => {
-  return buildAnswerCompareKey(content || '')
+type CompareKeyOptions = { options?: string | null; unordered?: boolean }
+
+const normalizeAnswerForComparison = (content: string, opts?: CompareKeyOptions): string => {
+  return buildAnswerCompareKey(content || '', opts)
 }
 
-const getMostFrequentSuccessfulAnswer = (responses: string[]): string => {
+const getMostFrequentSuccessfulAnswer = (responses: string[], opts?: CompareKeyOptions): string => {
   const answerStats = new Map<string, { count: number; firstIndex: number; original: string }>()
 
   responses.forEach((response, index) => {
     const original = stripMarkdownCodeBlock(response).trim()
-    const key = normalizeAnswerForComparison(response)
+    const key = normalizeAnswerForComparison(response, opts)
     if (!key) return
 
     const existing = answerStats.get(key)
@@ -2865,8 +2867,13 @@ const callModelAPI = async (requestId: string, query: string) => {
       if (!isRequestCancelled(requestId)) {
         const r1 = results.find(r => r.model.id === firstWave[0].id)
         const r2 = results.find(r => r.model.id === firstWave[1].id)
-        const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response) : ''
-        const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response) : ''
+        // 传入选项与题型：多选题的 ### 片段顺序无关，选项字母前缀需与输出规范化同样剥离
+        const compareOpts: CompareKeyOptions = {
+          options: getRequestOptionsFromLog(requestId),
+          unordered: isOrderInsensitiveType(getRequestTypeFromLog(requestId))
+        }
+        const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response, compareOpts) : ''
+        const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response, compareOpts) : ''
 
         if (k1 && k1 === k2) {
           console.log('前两个模型答案一致，跳过其余', laterWave.length, '个模型的调用')
@@ -2932,7 +2939,10 @@ const callModelAPI = async (requestId: string, query: string) => {
     const baseCombinedResponse = successfulModels.length === 1
       ? successfulResults[0]
       : successfulModels.map((model, i) => `[${model.displayName}]\n${successfulResults[i]}`).join('\n\n')
-    const majorityBaseAnswer = getMostFrequentSuccessfulAnswer(successfulResults)
+    const majorityBaseAnswer = getMostFrequentSuccessfulAnswer(successfulResults, {
+      options: getRequestOptionsFromLog(requestId),
+      unordered: isOrderInsensitiveType(getRequestTypeFromLog(requestId))
+    })
 
     if (summaryModels.length > 0 && successfulResults.length > 0) {
       console.log('开始总结阶段:', summaryModels.map(m => m.displayName))
@@ -3171,16 +3181,29 @@ const getRequestReasoningForBackend = (requestId: string, modelId?: string): str
   return ''
 }
 
-const getRequestOptionsFromLog = (requestId: string): string => {
+/** 从请求日志中读取指定字段（options / type） */
+const getRequestFieldFromLog = (requestId: string, field: 'options' | 'type'): string => {
   const log = requestLogs.value.find(l => l.id === requestId)
   if (!log?.requestBody) return ''
   try {
     const parsed = JSON.parse(log.requestBody)
-    return typeof parsed.options === 'string' ? parsed.options : ''
+    return typeof parsed[field] === 'string' ? parsed[field] : ''
   } catch {
     return ''
   }
 }
+
+const getRequestOptionsFromLog = (requestId: string): string => getRequestFieldFromLog(requestId, 'options')
+
+/** 题目类型（OCS 传入，如 single / multiple / judgement / completion） */
+const getRequestTypeFromLog = (requestId: string): string => getRequestFieldFromLog(requestId, 'type')
+
+/**
+ * 答案的 ### 片段是否与顺序无关。
+ * 依据 OCS 源码：resolveMultiple 逐片段独立匹配选项（顺序无关），
+ * resolveCompletion 按索引对应空位（顺序有语义，「北京###上海」不可乱序）。
+ */
+const isOrderInsensitiveType = (type: string): boolean => /multiple|多选/i.test(type || '')
 
 // 发送模型响应到后端
 const applyLocalRequestCompletion = (
