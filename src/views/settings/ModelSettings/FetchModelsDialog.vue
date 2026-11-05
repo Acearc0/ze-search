@@ -68,7 +68,7 @@
               <option value="text">文本</option>
               <option value="vision">视觉</option>
             </select>
-            <span v-if="item.exists" class="fetch-exists-tag">已存在</span>
+            <span v-if="item.exists" class="fetch-exists-tag" :title="existingHint">{{ existingLabel }}</span>
           </label>
         </div>
       </div>
@@ -78,11 +78,14 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { guessModelCategory, matchesTab } from '../../../utils/modelCategory'
+import { guessModelCategory } from '../../../utils/modelCategory'
+import { tabsForCapabilities, categoryFromCapabilities } from '../../../utils/modelCapabilities'
 
 export interface FetchModelItem {
   id: string
   exists: boolean
+  /** 供应商给出的能力标签（百炼原生端点）；null 表示拿不到，回退命名判断 */
+  capabilities?: string[] | null
 }
 
 const props = defineProps<{
@@ -100,8 +103,8 @@ const emit = defineEmits<{
 const selectedIds = ref<string[]>([])
 const modelTypes = ref<Record<string, 'text' | 'vision'>>({})
 const searchQuery = ref('')
-// 命名启发式并非可靠（不含 vl/vision/数字+v 关键词的视觉模型会被判成文本），
-// 因此过滤必须可解除，否则这类模型在视觉页签永远拉不到
+// 能力标签覆盖不全（百炼原生端点约 84%），且非百炼供应商完全没有，
+// 因此过滤必须可解除，否则这些模型在当前页签永远拉不到
 const showAll = ref(false)
 
 const categoryLabel = computed(() => {
@@ -110,14 +113,43 @@ const categoryLabel = computed(() => {
   return '文本'
 })
 
-const matchesTarget = (id: string): boolean => matchesTab(id, props.category)
+/**
+ * 该模型是否属于当前页签。
+ * 优先用供应商能力标签（权威）：识图看 VU/Omni，文本看 TG。
+ * 无标签时才回退到命名启发式——后者会把 qwen-image（文生图）误判成视觉、
+ * 把 kimi-k3、deepseek-v4.1-flash（含 VU）漏判成纯文本。
+ */
+const matchesTarget = (item: FetchModelItem): boolean => {
+  const tabs = tabsForCapabilities(item.capabilities)
+  if (tabs) return props.category === 'vision' ? tabs.vision : tabs.text
+  return guessModelCategory(item.id) === (props.category === 'vision' ? 'vision' : 'text')
+}
+
+/** 类型预填：有标签按标签，无标签按命名 */
+const guessTypeFor = (item: FetchModelItem): 'text' | 'vision' => {
+  const byCap = categoryFromCapabilities(item.capabilities, props.category === 'vision' ? 'vision' : 'text')
+  if (byCap) return byCap
+  return guessModelCategory(item.id)
+}
+
+/**
+ * 已存在模型的提示。
+ * 「已存在」不等于「不可用」：模型列表在识图页签也会列出可兼任的文本模型
+ * （见 ModelSettings.filteredModels），所以这里引导用户回列表勾选，而不是重复拉取。
+ */
+const existingLabel = computed(() => (props.category === 'vision' ? '已添加' : '已存在'))
+
+const existingHint = computed(() => {
+  if (props.category !== 'vision') return '该模型已在列表中'
+  return '该模型已在列表中。识图无需重复添加：回到模型列表勾选它，即可让它兼任识图模型'
+})
 
 // 当前页签匹配的模型（未叠加搜索）
 const scopedItems = computed(() =>
-  showAll.value ? props.items : props.items.filter(i => matchesTarget(i.id))
+  showAll.value ? props.items : props.items.filter(i => matchesTarget(i))
 )
 
-const hiddenCount = computed(() => props.items.filter(i => !matchesTarget(i.id)).length)
+const hiddenCount = computed(() => props.items.filter(i => !matchesTarget(i)).length)
 
 // 列表搜索过滤（与模型选择弹窗一致的交互）
 const filteredItems = computed(() => {
@@ -130,10 +162,10 @@ watch(() => props.visible, (v) => {
   if (v) {
     searchQuery.value = ''
     showAll.value = false
-    const scoped = props.items.filter(i => matchesTarget(i.id))
+    const scoped = props.items.filter(i => matchesTarget(i))
     selectedIds.value = scoped.filter(i => !i.exists).map(i => i.id)
     const types: Record<string, 'text' | 'vision'> = {}
-    for (const item of props.items) types[item.id] = guessModelCategory(item.id)
+    for (const item of props.items) types[item.id] = guessTypeFor(item)
     modelTypes.value = types
   }
 })

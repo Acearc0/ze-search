@@ -392,6 +392,7 @@ import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useModelConfig, fetchRemoteModelsCatalog } from '../../services/modelConfig'
 import type { AIPlatform, AIModel, RemoteModelIconMapping } from '../../services/modelConfig'
 import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../../services/modelProtocol'
+import { parseNativeModelsResponse, buildNativeModelsPageUrl, normalizeModelKey } from '../../utils/modelCapabilities'
 import { environmentDetector } from '../../services/environmentDetector'
 import { getPlatformIconDisplayUrl, resolvePlatformIconUrl } from '../../services/iconCache'
 import PlatformConfigDialog from './ModelSettings/PlatformConfigDialog.vue'
@@ -1298,7 +1299,7 @@ const saveModel = async (modelData: Partial<AIModel>) => {
 // ===== 自动拉取模型列表（GET {baseUrl}/v1/models，OpenAI 兼容格式） =====
 const fetchModelsLoading = ref(false)
 const showFetchModelsDialog = ref(false)
-const fetchedModels = ref<Array<{ id: string; exists: boolean }>>([])
+const fetchedModels = ref<Array<{ id: string; exists: boolean; capabilities: string[] | null }>>([])
 
 // 兼容各家供应商的 Base URL 写法：剥离误填的 /chat/completions 后缀，
 // 已带版本段（/v1、/v1beta…）时直接拼 /models，否则依次尝试 /v1/models 和 /models
@@ -1311,6 +1312,34 @@ const buildModelsEndpoints = (baseUrl: string) => {
   }
   if (/\/v\d+[a-z]*$/i.test(b)) return [`${b}/models`]
   return [`${b}/v1/models`, `${b}/models`]
+}
+
+/**
+ * 尽力获取能力标签：百炼的 OpenAI 兼容端点不返回能力信息，
+ * 需另请求 DashScope 原生 /api/v1/models（同一 API Key 可用，分页返回 capabilities）。
+ * 非百炼供应商会 404 或结构不符 —— 一律静默返回 null，由弹窗回退到命名启发式，
+ * 绝不让「拿不到标签」变成「拉取失败」。
+ */
+const fetchNativeCapabilities = async (
+  fetchFn: typeof fetch,
+  headers: Record<string, string>,
+  baseUrl: string
+): Promise<Map<string, string[]> | null> => {
+  const merged = new Map<string, string[]>()
+  try {
+    for (let pageNo = 1; pageNo <= 8; pageNo++) {
+      const resp = await fetchFn(buildNativeModelsPageUrl(baseUrl, pageNo), { method: 'GET', headers })
+      if (!resp.ok) return merged.size ? merged : null
+      const caps = parseNativeModelsResponse(await resp.json())
+      if (!caps) return merged.size ? merged : null
+      for (const [id, list] of caps) if (!merged.has(id)) merged.set(id, list)
+      if (caps.size < 100) break // 最后一页
+    }
+  } catch (e) {
+    console.warn('获取模型能力标签失败，回退到命名判断:', e)
+    return merged.size ? merged : null
+  }
+  return merged.size ? merged : null
 }
 
 const fetchModelsFromPlatform = async () => {
@@ -1339,9 +1368,14 @@ const fetchModelsFromPlatform = async () => {
     const list: any[] = Array.isArray(data?.data) ? data.data : []
     const ids = list.map(m => String(m?.id ?? '')).filter(Boolean).sort((a, b) => a.localeCompare(b))
     if (ids.length === 0) throw new Error('接口未返回任何模型')
+
+    // 能力标签来自原生端点；拿不到则为 null，弹窗按命名启发式判断
+    const capsMap = await fetchNativeCapabilities(fetch as typeof fetch, headers, platform.baseUrl)
+
     fetchedModels.value = ids.map(id => ({
       id,
-      exists: platform.models.some(m => (m.modelId || m.name) === id)
+      exists: platform.models.some(m => (m.modelId || m.name) === id),
+      capabilities: capsMap?.get(normalizeModelKey(id)) ?? null
     }))
     showFetchModelsDialog.value = true
   } catch (e: any) {
