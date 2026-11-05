@@ -130,3 +130,22 @@ test('护栏：普通答案里含「对/错/正确/错误」字样不被误归�
   assert.ok(!isSameAnswer('{"answer":"对，是"}', '{"answer":"正确"}'))
   assert.ok(!isSameAnswer('{"answer":"Y"}', '{"answer":"正确"}'), '单字母 Y 不得被当成「正确」')
 })
+
+// ---------- 词表对齐 OCS（judgement.ts 的 CORRECT_WORDS / INCORRECT_WORDS） ----------
+
+test('OCS 同义词一并归一：对的/是的/确定/不正确的 等', () => {
+  assert.ok(isSameAnswer('{"answer":"对的"}', '{"answer":"正确"}'))
+  assert.ok(isSameAnswer('{"answer":"是的"}', '{"answer":"对"}'))
+  assert.ok(isSameAnswer('{"answer":"确定"}', '{"answer":"正确"}'))
+  assert.ok(isSameAnswer('{"answer":"不对"}', '{"answer":"错误"}'))
+  assert.ok(isSameAnswer('{"answer":"不正确的"}', '{"answer":"错"}'))
+  assert.ok(isSameAnswer('{"answer":"不是"}', '{"answer":"否"}'))
+})
+
+test('刻意不收 1/0/T/F/X：填空题答案恰好是这些时不得被当成判断词', () => {
+  assert.ok(!isSameAnswer('{"answer":"1"}', '{"answer":"正确"}'), '填空答案 1 不应等于「正确」')
+  assert.ok(!isSameAnswer('{"answer":"0"}', '{"answer":"错误"}'), '填空答案 0 不应等于「错误」')
+  assert.ok(!isSameAnswer('{"answer":"T"}', '{"answer":"正确"}'))
+  assert.ok(!isSameAnswer('{"answer":"F"}', '{"answer":"错误"}'))
+  assert.ok(!isSameAnswer('{"answer":"X"}', '{"answer":"错误"}'))
+})
