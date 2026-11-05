@@ -20,8 +20,10 @@ import {
   isChatCapable,
   tabsForCapabilities,
   categoryFromCapabilities,
-  buildNativeModelsPageUrl
+  buildNativeModelsPageUrl,
+  resolveTabMembership
 } from '../src/utils/modelCapabilities.ts'
+import { guessModelCategory } from '../src/utils/modelCategory.ts'
 
 // 线上实测取值（2026-11-05，百炼 373 个模型）
 const REAL: Record<string, string[]> = {
@@ -158,4 +160,60 @@ test('百炼主站同样归一到 /api/v1/models', () => {
     buildNativeModelsPageUrl('https://dashscope.aliyuncs.com/compatible-mode/v1', 1),
     'https://dashscope.aliyuncs.com/api/v1/models?page_no=1&page_size=100'
   )
+})
+
+// ---------- 页签归属三态（决定老模型是否隐藏） ----------
+
+test('capsAvailable=false：非百炼供应商一律不隐藏，按命名判断', () => {
+  // 硅基流动/OpenRouter 等完全没有 capabilities，绝不能因此把整个平台藏掉
+  for (const id of ['deepseek-ai/DeepSeek-V4-Pro', 'Qwen/Qwen3.6-35B-A3B', 'zai-org/GLM-5']) {
+    const m = resolveTabMembership(id, null, 'text', false)
+    assert.equal(m.labeled, false)
+    assert.equal(m.visible, guessModelCategory(id) === 'text', `${id} 文本页签可见性应按命名`)
+  }
+  // 命名带视觉关键词的，在识图页签可见、文本页签不可见
+  assert.equal(resolveTabMembership('Qwen/Qwen3.6-VL', null, 'vision', false).visible, true)
+  assert.equal(resolveTabMembership('Qwen/Qwen3.6-VL', null, 'text', false).visible, false)
+})
+
+test('capsAvailable=true 且模型无标签：默认隐藏（qwen1.5/2.5 等老模型）', () => {
+  for (const legacy of ['qwen1.5-7b-chat', 'qwen2.5-0.5b-instruct', 'qwen-turbo-0919', 'test-sre-gpu-auto-handle']) {
+    const m = resolveTabMembership(legacy, null, 'text', true)
+    assert.equal(m.visible, false, `${legacy} 应默认隐藏`)
+    assert.equal(m.labeled, false)
+  }
+})
+
+test('无标签老模型仍给出可用类型，供「显示全部」时手动确认', () => {
+  const m = resolveTabMembership('qwen2.5-7b-instruct', null, 'text', true)
+  assert.equal(m.visible, false)
+  assert.equal(m.category, 'text')
+})
+
+test('有标签模型按标签判定，覆盖命名判断', () => {
+  // deepseek-v4.1-flash 名字像文本模型，但 caps 含 VU → 识图页签必须可见
+  const flash = resolveTabMembership('deepseek-v4.1-flash', REAL['deepseek-v4.1-flash'], 'vision', true)
+  assert.equal(flash.visible, true)
+  assert.equal(flash.labeled, true)
+
+  // qwen-image-2.0 名字含 image，但 caps=[IG] → 识图页签必须隐藏
+  const img = resolveTabMembership('qwen-image-2.0', REAL['qwen-image-2.0'], 'vision', true)
+  assert.equal(img.visible, false)
+
+  // 文生图在文本页签也不该出现（无 TG）
+  assert.equal(resolveTabMembership('qwen-image-2.0', REAL['qwen-image-2.0'], 'text', true).visible, false)
+})
+
+test('多能力模型在两个页签都可见', () => {
+  const kimi = REAL['kimi-k3']
+  assert.equal(resolveTabMembership('kimi-k3', kimi, 'text', true).visible, true)
+  assert.equal(resolveTabMembership('kimi-k3', kimi, 'vision', true).visible, true)
+  // 类型预填跟随页签
+  assert.equal(resolveTabMembership('kimi-k3', kimi, 'vision', true).category, 'vision')
+  assert.equal(resolveTabMembership('kimi-k3', kimi, 'text', true).category, 'text')
+})
+
+test('总结页签按文本处理', () => {
+  assert.equal(resolveTabMembership('glm-5.3', REAL['glm-5.3'], 'summary', true).visible, true)
+  assert.equal(resolveTabMembership('qwen-image-2.0', REAL['qwen-image-2.0'], 'summary', true).visible, false)
 })

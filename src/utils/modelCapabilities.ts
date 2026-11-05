@@ -1,3 +1,5 @@
+import { guessModelCategory } from './modelCategory.ts'
+
 /**
  * 模型能力标签解析（阿里云百炼 DashScope 原生 /api/v1/models）。
  *
@@ -104,4 +106,47 @@ export const categoryFromCapabilities = (
   if (tabs.text) return 'text'
   // 无 TG 无 VU（IG/VG/TTS/TR 等）：不属于任何页签，仅在「显示全部」时可见
   return 'text'
+}
+
+/** 弹窗页签归属判定结果 */
+export interface TabMembership {
+  /** 当前页签默认是否列出该模型 */
+  visible: boolean
+  /** 类型预填值 */
+  category: 'text' | 'vision'
+  /** 是否依据能力标签判定（false = 只能靠命名猜，UI 需区别对待） */
+  labeled: boolean
+}
+
+/**
+ * 拉取弹窗的页签归属判定，三态语义：
+ *
+ * 1. `capsAvailable=false`：本次拉取没拿到能力数据源（非百炼供应商、原生端点 404）。
+ *    **一律按命名启发式判断，绝不隐藏任何模型**——否则会把其他平台的拉取打死。
+ * 2. `capsAvailable=true` 且该模型有标签：按标签判定，权威。
+ * 3. `capsAvailable=true` 但该模型无标签（百炼原生端点里查不到的老模型，
+ *    如 qwen1.5-*、qwen2.5-*、内部测试模型）：默认不列出，仍可通过「显示全部」勾选。
+ */
+export const resolveTabMembership = (
+  modelId: string,
+  capabilities: ModelCapabilities | null | undefined,
+  tab: 'text' | 'vision' | 'summary',
+  capsAvailable: boolean
+): TabMembership => {
+  const prefer: 'text' | 'vision' = tab === 'vision' ? 'vision' : 'text'
+  const guessCategory = guessModelCategory(modelId)
+
+  if (!capsAvailable) {
+    return { visible: guessCategory === prefer, category: guessCategory, labeled: false }
+  }
+
+  const tabs = tabsForCapabilities(capabilities)
+  if (!tabs) {
+    // 老模型：无标签 → 默认隐藏，但保留在「显示全部」里
+    return { visible: false, category: guessCategory, labeled: false }
+  }
+
+  const visible = tab === 'vision' ? tabs.vision : tabs.text
+  const category = categoryFromCapabilities(capabilities, prefer) ?? guessCategory
+  return { visible, category, labeled: true }
 }

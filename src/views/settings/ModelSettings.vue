@@ -380,6 +380,7 @@
       :visible="showFetchModelsDialog"
       :items="fetchedModels"
       :category="selectedCategory"
+      :caps-available="fetchedCapsAvailable"
       @confirm="addFetchedModels"
       @cancel="showFetchModelsDialog = false"
     />
@@ -1300,6 +1301,8 @@ const saveModel = async (modelData: Partial<AIModel>) => {
 const fetchModelsLoading = ref(false)
 const showFetchModelsDialog = ref(false)
 const fetchedModels = ref<Array<{ id: string; exists: boolean; capabilities: string[] | null }>>([])
+/** 本次拉取是否拿到了可用的能力标签源（决定弹窗能否隐藏无标签的老模型） */
+const fetchedCapsAvailable = ref(false)
 
 // 兼容各家供应商的 Base URL 写法：剥离误填的 /chat/completions 后缀，
 // 已带版本段（/v1、/v1beta…）时直接拼 /models，否则依次尝试 /v1/models 和 /models
@@ -1371,6 +1374,12 @@ const fetchModelsFromPlatform = async () => {
 
     // 能力标签来自原生端点；拿不到则为 null，弹窗按命名启发式判断
     const capsMap = await fetchNativeCapabilities(fetch as typeof fetch, headers, platform.baseUrl)
+
+    // 只有「标签源确实覆盖了本次可调用模型」才允许隐藏无标签模型。
+    // 命中率过低通常意味着 key 与标签源不同 workspace（标签集与可调用集对不上），
+    // 此时若按「无标签=老模型」隐藏，会把整个平台的模型都藏掉。
+    const hitCount = capsMap ? ids.filter(id => capsMap.has(normalizeModelKey(id))).length : 0
+    fetchedCapsAvailable.value = !!capsMap && ids.length > 0 && hitCount / ids.length >= 0.2
 
     fetchedModels.value = ids.map(id => ({
       id,

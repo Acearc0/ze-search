@@ -34,16 +34,16 @@
             v-if="hiddenCount > 0 || showAll"
             type="button"
             class="fetch-tool-btn"
-            :title="`接口返回 ${items.length} 个模型，其中 ${hiddenCount} 个不属于当前页签`"
+            :title="hiddenBreakdown"
             @click="toggleShowAll"
           >{{ showAll ? `仅看${categoryLabel}` : `显示全部（含 ${hiddenCount} 个其他）` }}</button>
-          <span class="fetch-hint">{{ showAll ? '已显示全部模型，类型可逐行修改' : '按模型命名预填类型，可逐行修改' }}</span>
+          <span class="fetch-hint">{{ showAll ? '已显示全部模型，类型可逐行修改' : '按供应商能力标签分类，可逐行修改' }}</span>
         </div>
         <div v-if="filteredItems.length === 0" class="fetch-empty">
-          <template v-if="searchQuery.trim()">没有匹配「{{ searchQuery.trim() }}」的模型<template v-if="!showAll">，可点下方「显示全部」再搜</template></template>
+          <template v-if="searchQuery.trim()">没有匹配「{{ searchQuery.trim() }}」的模型<template v-if="!showAll">，可点上方「显示全部」再搜</template></template>
           <template v-else-if="showAll">没有可选的模型</template>
           <template v-else>
-            接口未识别出{{ categoryLabel }}模型。
+            当前页签没有可用模型。
             <button type="button" class="fetch-tool-btn" @click="toggleShowAll">显示全部 {{ items.length }} 个</button>
             后手动改类型
           </template>
@@ -68,6 +68,11 @@
               <option value="text">文本</option>
               <option value="vision">视觉</option>
             </select>
+            <span
+              v-if="isUnlabeled(item)"
+              class="fetch-unlabeled-tag"
+              title="供应商未提供该模型的能力标签，分类按命名推断，可能不准；默认不在当前页签列出"
+            >无能力信息</span>
             <span v-if="item.exists" class="fetch-exists-tag" :title="existingHint">{{ existingLabel }}</span>
           </label>
         </div>
@@ -78,8 +83,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { guessModelCategory } from '../../../utils/modelCategory'
-import { tabsForCapabilities, categoryFromCapabilities } from '../../../utils/modelCapabilities'
+import { resolveTabMembership } from '../../../utils/modelCapabilities'
 
 export interface FetchModelItem {
   id: string
@@ -93,6 +97,12 @@ const props = defineProps<{
   items: FetchModelItem[]
   /** 当前页签：弹窗默认只列出与该页签匹配的模型 */
   category: 'text' | 'vision' | 'summary'
+  /**
+   * 本次拉取是否拿到了供应商能力数据源。
+   * false（非百炼供应商、原生端点不可用）时**绝不隐藏任何模型**，
+   * 全部按命名启发式判断——否则会把其他平台的拉取打死。
+   */
+  capsAvailable: boolean
 }>()
 
 const emit = defineEmits<{
@@ -103,7 +113,7 @@ const emit = defineEmits<{
 const selectedIds = ref<string[]>([])
 const modelTypes = ref<Record<string, 'text' | 'vision'>>({})
 const searchQuery = ref('')
-// 能力标签覆盖不全（百炼原生端点约 84%），且非百炼供应商完全没有，
+// 能力标签覆盖不全（百炼原生端点约 84%，缺的是 qwen1.5/2.5 等老模型），
 // 因此过滤必须可解除，否则这些模型在当前页签永远拉不到
 const showAll = ref(false)
 
@@ -113,24 +123,39 @@ const categoryLabel = computed(() => {
   return '文本'
 })
 
+const membership = (item: FetchModelItem) =>
+  resolveTabMembership(item.id, item.capabilities, props.category, props.capsAvailable)
+
 /**
- * 该模型是否属于当前页签。
- * 优先用供应商能力标签（权威）：识图看 VU/Omni，文本看 TG。
- * 无标签时才回退到命名启发式——后者会把 qwen-image（文生图）误判成视觉、
- * 把 kimi-k3、deepseek-v4.1-flash（含 VU）漏判成纯文本。
+ * 该模型是否属于当前页签（三态，见 resolveTabMembership）：
+ * 有标签按标签（识图看 VU/Omni，文本看 TG）；
+ * 拿不到数据源时按命名猜且不隐藏；
+ * 拿到数据源但该模型无标签（老模型/内部测试模型）则默认不列出。
  */
-const matchesTarget = (item: FetchModelItem): boolean => {
-  const tabs = tabsForCapabilities(item.capabilities)
-  if (tabs) return props.category === 'vision' ? tabs.vision : tabs.text
-  return guessModelCategory(item.id) === (props.category === 'vision' ? 'vision' : 'text')
-}
+const matchesTarget = (item: FetchModelItem): boolean => membership(item).visible
 
 /** 类型预填：有标签按标签，无标签按命名 */
-const guessTypeFor = (item: FetchModelItem): 'text' | 'vision' => {
-  const byCap = categoryFromCapabilities(item.capabilities, props.category === 'vision' ? 'vision' : 'text')
-  if (byCap) return byCap
-  return guessModelCategory(item.id)
-}
+const guessTypeFor = (item: FetchModelItem): 'text' | 'vision' => membership(item).category
+
+/** 该模型是否「供应商未给能力标签」。仅在标签源可用时才有意义。 */
+const isUnlabeled = (item: FetchModelItem): boolean =>
+  props.capsAvailable && (!item.capabilities || item.capabilities.length === 0)
+
+/** 无能力标签的模型数（老模型 / 内部测试模型） */
+const unlabeledCount = computed(() => props.items.filter(isUnlabeled).length)
+
+/**
+ * 「显示全部」按钮的说明：拆清隐藏原因，
+ * 避免用户把「被过滤」误读成「拉取失败」或又一处死锁。
+ */
+const hiddenBreakdown = computed(() => {
+  const otherType = props.items.filter(i => !isUnlabeled(i) && !matchesTarget(i)).length
+  const hidden = hiddenCount.value
+  const parts: string[] = [`接口返回 ${props.items.length} 个模型`]
+  if (otherType) parts.push(`${otherType} 个属其他页签`)
+  if (unlabeledCount.value) parts.push(`${unlabeledCount.value} 个无能力信息（老模型，默认隐藏）`)
+  return `${parts.join('，')}；当前隐藏 ${hidden} 个`
+})
 
 /**
  * 已存在模型的提示。
@@ -368,5 +393,15 @@ const handleOverlayClick = (event: MouseEvent) => {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.fetch-unlabeled-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--platform-toggle-bg);
+  cursor: help;
 }
 </style>
