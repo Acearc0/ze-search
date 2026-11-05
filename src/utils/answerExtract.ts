@@ -18,7 +18,7 @@
 
 // 显式 .ts 扩展名：本文件会被 node 直跑的单测加载（tsconfig 已开 allowImportingTsExtensions）
 import { canonicalJudgementAnswer } from './judgementAnswer.ts'
-import { parseOptionLetterMap, stripLeadingOptionLabel } from './optionLabels.ts'
+import { parseOptionLetterMap, splitCleanedAnswerSegments } from './optionLabels.ts'
 
 /** 与 Home.vue 展示层一致：去除 markdown 代码块包裹（内部使用，展示层仍用自己的实现） */
 const stripMarkdownCodeBlock = (content: string): string => {
@@ -117,25 +117,10 @@ export const buildAllFailureOutput = (detail: string): string => {
 /**
  * 剥离答案尾部的引用来源。
  *
- * 背景：联网搜索的引导语曾要求模型「在 answer 正文末尾追加来源」，导致来源被写进答案，
- * 进而污染入库文本与发给 OCS 的判分答案（实测题库 ID 135：`字符编码（来源: 1. https://…）`）。
- *
- * 护栏：必须真的含 http(s) 才剥离，避免误伤「资金来源:企业自有资金」这类正常答案；
- * 只锚定尾部，不动正文中间的括号。
+ * 实现已移到 answerNoise.ts（无依赖模块），以便输出路径与判等路径
+ * 在「逐段剥离」这一关键约束上共用同一实现。此处 re-export 保持既有调用方不变。
  */
-export const stripSourceCitation = (answer: string): string => {
-  const raw = (answer || '').trim()
-  if (!raw) return ''
-
-  // （来源: 1. https://a 2. https://b） / (来源：https://a) / 来源: https://a / SOURCES: 1. https://a
-  const stripped = raw
-    .replace(/[（(\s]*(?:参考|引用)?来源\s*[:：][\s\S]*?https?:\/\/\S[\s\S]*$/iu, '')
-    .replace(/[（(\s]*SOURCES\s*[:：][\s\S]*?https?:\/\/\S[\s\S]*$/i, '')
-    .trim()
-
-  // 残留的悬挂标点/左括号
-  return stripped.replace(/[（(，,、；;：:\s]+$/u, '').trim()
-}
+export { stripSourceCitation } from './answerNoise.ts'
 
 /**
  * 生成用于「是否一致」判定的比较键：
@@ -161,28 +146,24 @@ export const buildAnswerCompareKey = (
   // 判断题的合法答案「错误」不带冒号，不会命中此判断。
   if (!answer && /^错误\s*[:：]/.test(fallback)) return ''
 
-  // 剥离来源：否则「带来源」与「不带来源」的同一答案会被判为不一致，
-  // 白白触发仲裁模型（与 123dcae 修的是同一类误判）。
-  let base = stripSourceCitation(answer || fallback)
-  if (!base) return ''
+  // 剥离来源、选项字母前缀与外层包裹引号：模型常违反「禁止写 B. 传动角」的指令，
+  // 对「答案要不要带引号」也没有统一习惯（实测同一道 SQL 题
+  // qwen 输出 王_、deepseek 输出 "王_"，语义相同却判不一致，白调仲裁模型）。
+  // 剥离逻辑与输出路径共用 splitCleanedAnswerSegments，两条链路口径必然一致；
+  // 其中来源是**逐段**剥离的，整段剥离会吞掉 `###` 之后的片段。
+  const base = answer || fallback
+  if (!base.trim()) return ''
 
-  // 剥离选项字母前缀：模型常违反「禁止写 B. 传动角」的指令。
-  // 必须与发给 OCS 的口径一致——normalizeAnswerAgainstOptions 会剥掉前缀，
-  // 若比较键不剥，同一答案会出现「输出干净、判等却不同」的不对称误判。
   const optionMap = parseOptionLetterMap(opts?.options)
-  const segments = base.split('###').map((s) => s.trim()).filter(Boolean)
-  if (segments.length > 1) {
-    const stripped = segments.map((s) => stripLeadingOptionLabel(s, optionMap))
-    // 多选题：OCS resolveMultiple 逐片段独立匹配选项，勾选结果与顺序无关 → 排序后比较
-    // 填空题：片段按空位索引对应，顺序有语义 → 保持原顺序
-    base = (opts?.unordered ? [...stripped].sort() : stripped).join('###')
-  } else {
-    base = stripLeadingOptionLabel(base, optionMap)
-  }
+  const segments = splitCleanedAnswerSegments(base, optionMap)
+  if (segments.length === 0) return ''
+  // 多选题：OCS resolveMultiple 逐片段独立匹配选项，勾选结果与顺序无关 → 排序后比较
+  // 填空题：片段按空位索引对应，顺序有语义 → 保持原顺序
+  const cleaned = (opts?.unordered ? [...segments].sort() : segments).join('###')
 
   // 先做形状归一（全半角、去空白、小写），再按归一后的整串匹配判断词：
   // judgementAnswer 约定接收已归一的输入，故「 TRUE 」「√」这类也能命中。
-  const shaped = toHalfwidth(base).replace(/\s+/g, '').toLowerCase()
+  const shaped = toHalfwidth(cleaned).replace(/\s+/g, '').toLowerCase()
 
   // 判断题同义归一：题库选项是「对/错」而旧指令要求「正确/错误」，
   // 两个模型各按一套输出时字面不等会误触发第三模型（存量脏数据兜底）。

@@ -1,6 +1,5 @@
 // 显式 .ts 扩展名：本文件会被 node 直跑的单测加载（tsconfig 已开 allowImportingTsExtensions）
-import { stripSourceCitation } from './answerExtract.ts'
-import { parseOptionLetterMap, stripLeadingOptionLabel } from './optionLabels.ts'
+import { parseOptionLetterMap, stripLeadingOptionLabel, splitCleanedAnswerSegments } from './optionLabels.ts'
 
 // parseOptionLetterMap / stripLeadingOptionLabel 的实现已移到 optionLabels.ts，
 // 由本模块与 answerExtract（比较键）共用，确保「发给 OCS 的答案」与「判等用的答案」口径一致。
@@ -10,7 +9,12 @@ export { parseOptionLetterMap, stripLeadingOptionLabel }
  * 将模型答案规范为选项正文：
  * - `ABD` / `A` → 映射选项文字（多选用 ###）
  * - `B. 传动角` → `传动角`
+ * - `"B. 传动角"` / `B. "传动角"` / `"键盘###鼠标"` → 剥包裹后映射
  * - 多空 `A###C` 同样处理
+ *
+ * OCS 对答案做整串匹配，残留引号或字母前缀都会导致匹配失败。
+ * 剥离步骤（剥整体外层 + 切段 + 逐段循环剥离）与判等路径共用
+ * splitCleanedAnswerSegments，两条链路对同一文本必然得到同一结果。
  */
 export const normalizeAnswerAgainstOptions = (
   answer: string,
@@ -20,16 +24,14 @@ export const normalizeAnswerAgainstOptions = (
   if (!raw) return ''
 
   const map = parseOptionLetterMap(options)
-  const parts = raw.includes('###') ? raw.split('###') : [raw]
 
-  const normalized = parts.map((part) => {
-    let p = (part || '').trim()
-    if (!p) return ''
+  // 切段并逐段剥离来源、字母前缀与包裹引号（与判等路径共用同一实现）。
+  // 注意不要在这里先整段 stripSourceCitation：尾部锚定的正则会从来源一路
+  // 吞到字符串末尾，把 `北京（来源: https://a）###上海` 里的 `###上海` 一起删掉。
+  const segments = splitCleanedAnswerSegments(raw, map)
 
-    // 剥离联网搜索引用来源：答案会被直接判分，链接必须不在其中
-    p = stripSourceCitation(p)
-    p = stripLeadingOptionLabel(p, map)
-
+  const normalized = segments.map((p) => {
+    // 纯字母答案（A / ABD）映射为选项正文
     const compact = p.replace(/\s+/g, '')
     if (map.size > 0 && /^[A-Za-z]{1,8}$/.test(compact)) {
       const letters = compact.toUpperCase().split('')
@@ -41,10 +43,6 @@ export const normalizeAnswerAgainstOptions = (
     return p
   }).filter(Boolean)
 
-  // 单段若已在上面展开成多段 ###，避免再包一层
-  if (normalized.length === 1 && normalized[0].includes('###') && parts.length === 1) {
-    return normalized[0]
-  }
   return normalized.join('###')
 }
 

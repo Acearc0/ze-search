@@ -199,3 +199,55 @@ test('多选排序不影响不同答案集合的区分', () => {
   assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"键盘###显示器"}', opts))
   assert.ok(!isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"键盘"}', opts), '少选一个不得判等')
 })
+
+// ---------- 外层包裹引号：模型对「答案要不要带引号」习惯不一 ----------
+
+test('回归（2026-11-05 截图）：SQL 题三模型中 deepseek 给答案套引号，不应触发仲裁', () => {
+  const qwen = '{"answer":"王_"}'
+  const deepseek = '{"answer":"\\"王_\\""}'
+  const glm = '{"answer":"王_"}'
+  // 第一波 qwen vs deepseek 必须判等，否则就会白调 glm-5.3
+  assert.ok(isSameAnswer(qwen, deepseek), '带引号与不带引号应判等')
+  assert.ok(isSameAnswer(qwen, glm))
+  assert.ok(isSameAnswer(deepseek, glm))
+})
+
+test('引号形态全覆盖：ASCII / 中文弯引号 / 单引号 / 反引号 / 书名号', () => {
+  const plain = '{"answer":"王_"}'
+  for (const wrapped of [
+    '{"answer":"\\"王_\\""}',
+    '{"answer":"“王_”"}',
+    '{"answer":"‘王_’"}',
+    '{"answer":"\'王_\'"}',
+    '{"answer":"`王_`"}',
+    '{"answer":"「王_」"}',
+    '{"answer":"『王_』"}'
+  ]) {
+    assert.ok(isSameAnswer(plain, wrapped), `应判等：${wrapped}`)
+  }
+})
+
+test('多层包裹也能剥离，但不会剥穿成空', () => {
+  assert.ok(isSameAnswer('{"answer":"王_"}', '{"answer":"“\\"王_\\"”"}'), '两层包裹')
+  // 答案本身就是引号字符时不能被剥没：比较键非空
+  assert.ok(buildAnswerCompareKey('{"answer":"\\""}').length > 0, '单个引号答案不应变空')
+})
+
+test('护栏：引号只剥首尾成对的，不动答案内部的符号', () => {
+  // 这道题考查的正是通配符差异，绝不能因剥引号而塌缩
+  assert.ok(!isSameAnswer('{"answer":"王_"}', '{"answer":"王__"}'), '王_ 与 王__ 是不同选项')
+  assert.ok(!isSameAnswer('{"answer":"王%"}', '{"answer":"%王%"}'), '王% 与 %王% 是不同选项')
+  // 内部引号不剥
+  assert.ok(!isSameAnswer('{"answer":"他说"对"啊"}', '{"answer":"他说对啊"}'), '中间引号不属于包裹')
+})
+
+test('多选片段各自带引号也能与干净版本判等', () => {
+  const opts = { unordered: true }
+  assert.ok(isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"\\"键盘\\"###\\"鼠标\\""}', opts))
+  assert.ok(isSameAnswer('{"answer":"键盘###鼠标"}', '{"answer":"“键盘###鼠标”"}', opts), '整体包裹一种、逐段包裹另一种')
+})
+
+test('字母前缀与引号同时出现时都能剥（B. "传动角"）', () => {
+  const opts = { options: 'A. 压力角\nB. 传动角\nC. 极力夹角' }
+  assert.ok(isSameAnswer('{"answer":"传动角"}', '{"answer":"B. \\"传动角\\""}', opts))
+})
