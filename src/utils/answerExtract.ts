@@ -92,8 +92,31 @@ const toHalfwidth = (text: string): string =>
   text.replace(/[，。：；！（）【】〔〕“”‘’、　]/g, (ch) => FULLWIDTH_TO_HALFWIDTH[ch] ?? ch)
 
 /**
+ * 剥离答案尾部的引用来源。
+ *
+ * 背景：联网搜索的引导语曾要求模型「在 answer 正文末尾追加来源」，导致来源被写进答案，
+ * 进而污染入库文本与发给 OCS 的判分答案（实测题库 ID 135：`字符编码（来源: 1. https://…）`）。
+ *
+ * 护栏：必须真的含 http(s) 才剥离，避免误伤「资金来源:企业自有资金」这类正常答案；
+ * 只锚定尾部，不动正文中间的括号。
+ */
+export const stripSourceCitation = (answer: string): string => {
+  const raw = (answer || '').trim()
+  if (!raw) return ''
+
+  // （来源: 1. https://a 2. https://b） / (来源：https://a) / 来源: https://a / SOURCES: 1. https://a
+  const stripped = raw
+    .replace(/[（(\s]*(?:参考|引用)?来源\s*[:：][\s\S]*?https?:\/\/\S[\s\S]*$/iu, '')
+    .replace(/[（(\s]*SOURCES\s*[:：][\s\S]*?https?:\/\/\S[\s\S]*$/i, '')
+    .trim()
+
+  // 残留的悬挂标点/左括号
+  return stripped.replace(/[（(，,、；;：:\s]+$/u, '').trim()
+}
+
+/**
  * 生成用于「是否一致」判定的比较键：
- * 优先取 answer 字段，取不到则退回整段正文；再统一去空白、全半角、大小写。
+ * 优先取 answer 字段，取不到则退回整段正文；再剥离来源、统一去空白/全半角/大小写。
  * 返回空串表示无可用内容（调用方按「不一致」处理，避免把空响应当成一致）。
  */
 export const buildAnswerCompareKey = (content: string): string => {
@@ -106,7 +129,9 @@ export const buildAnswerCompareKey = (content: string): string => {
   // 判断题的合法答案「错误」不带冒号，不会命中此判断。
   if (!answer && /^错误\s*[:：]/.test(fallback)) return ''
 
-  const base = answer || fallback
+  // 剥离来源：否则「带来源」与「不带来源」的同一答案会被判为不一致，
+  // 白白触发仲裁模型（与 123dcae 修的是同一类误判）。
+  const base = stripSourceCitation(answer || fallback)
   if (!base) return ''
 
   return toHalfwidth(base).replace(/\s+/g, '').toLowerCase()

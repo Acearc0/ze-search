@@ -1,3 +1,6 @@
+// 显式 .ts 扩展名：本文件会被 node 直跑的单测加载（tsconfig 已开 allowImportingTsExtensions）
+import { stripSourceCitation } from './answerExtract.ts'
+
 /** 从选项文本解析 A/B/C → 选项正文 */
 export const parseOptionLetterMap = (options: string | undefined | null): Map<string, string> => {
   const map = new Map<string, string>()
@@ -78,6 +81,8 @@ export const normalizeAnswerAgainstOptions = (
     let p = (part || '').trim()
     if (!p) return ''
 
+    // 剥离联网搜索引用来源：答案会被直接判分，链接必须不在其中
+    p = stripSourceCitation(p)
     p = stripLeadingOptionLabel(p, map)
 
     const compact = p.replace(/\s+/g, '')
