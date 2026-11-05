@@ -7,7 +7,9 @@
             <path d="M768 96c19.2-19.2 19.2-51.2 0-70.4-19.2-19.2-51.2-19.2-70.4 0l-448 448c-19.2 19.2-19.2 51.2 0 70.4l448 448c19.2 19.2 51.2 19.2 70.4 0 19.2-19.2 19.2-51.2 0-70.4L358.4 512l409.6-416z" fill="currentColor"/>
           </svg>
         </button>
-        <h3 class="dialog-title">拉取到的模型（{{ items.length }}）</h3>
+        <h3 class="dialog-title">
+          拉取到的{{ categoryLabel }}模型（{{ scopedItems.length }}<template v-if="!showAll && hiddenCount > 0"> / 共 {{ items.length }}</template>）
+        </h3>
         <button class="btn-primary-confirm" type="button" :disabled="selectedIds.length === 0" @click="handleConfirm">
           添加 {{ selectedIds.length > 0 ? selectedIds.length + ' 个' : '' }}
         </button>
@@ -28,7 +30,23 @@
         <div class="fetch-toolbar">
           <button type="button" class="fetch-tool-btn" @click="selectAll">全选新增</button>
           <button type="button" class="fetch-tool-btn" @click="clearAll">清空</button>
-          <span class="fetch-hint">按模型命名预填类型，可逐行修改</span>
+          <button
+            v-if="hiddenCount > 0 || showAll"
+            type="button"
+            class="fetch-tool-btn"
+            :title="`接口返回 ${items.length} 个模型，其中 ${hiddenCount} 个不属于当前页签`"
+            @click="toggleShowAll"
+          >{{ showAll ? `仅看${categoryLabel}` : `显示全部（含 ${hiddenCount} 个其他）` }}</button>
+          <span class="fetch-hint">{{ showAll ? '已显示全部模型，类型可逐行修改' : '按模型命名预填类型，可逐行修改' }}</span>
+        </div>
+        <div v-if="filteredItems.length === 0" class="fetch-empty">
+          <template v-if="searchQuery.trim()">没有匹配「{{ searchQuery.trim() }}」的模型<template v-if="!showAll">，可点下方「显示全部」再搜</template></template>
+          <template v-else-if="showAll">没有可选的模型</template>
+          <template v-else>
+            接口未识别出{{ categoryLabel }}模型。
+            <button type="button" class="fetch-tool-btn" @click="toggleShowAll">显示全部 {{ items.length }} 个</button>
+            后手动改类型
+          </template>
         </div>
         <div class="fetch-list">
           <label
@@ -60,6 +78,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { guessModelCategory, matchesTab } from '../../../utils/modelCategory'
 
 export interface FetchModelItem {
   id: string
@@ -69,6 +88,8 @@ export interface FetchModelItem {
 const props = defineProps<{
   visible: boolean
   items: FetchModelItem[]
+  /** 当前页签：弹窗默认只列出与该页签匹配的模型 */
+  category: 'text' | 'vision' | 'summary'
 }>()
 
 const emit = defineEmits<{
@@ -79,27 +100,40 @@ const emit = defineEmits<{
 const selectedIds = ref<string[]>([])
 const modelTypes = ref<Record<string, 'text' | 'vision'>>({})
 const searchQuery = ref('')
+// 命名启发式并非可靠（不含 vl/vision/数字+v 关键词的视觉模型会被判成文本），
+// 因此过滤必须可解除，否则这类模型在视觉页签永远拉不到
+const showAll = ref(false)
+
+const categoryLabel = computed(() => {
+  if (props.category === 'vision') return '识图'
+  if (props.category === 'summary') return '总结'
+  return '文本'
+})
+
+const matchesTarget = (id: string): boolean => matchesTab(id, props.category)
+
+// 当前页签匹配的模型（未叠加搜索）
+const scopedItems = computed(() =>
+  showAll.value ? props.items : props.items.filter(i => matchesTarget(i.id))
+)
+
+const hiddenCount = computed(() => props.items.filter(i => !matchesTarget(i.id)).length)
 
 // 列表搜索过滤（与模型选择弹窗一致的交互）
 const filteredItems = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return q ? props.items.filter(i => i.id.toLowerCase().includes(q)) : props.items
+  return q ? scopedItems.value.filter(i => i.id.toLowerCase().includes(q)) : scopedItems.value
 })
 
-// 按常见命名启发式预判模型类型，用户可逐行修改。
-// 视觉信号：vl / vision / 4v / image / omni，以及「数字+v」形态（glm-4.6v、glm-5v-turbo）。
-// [0-9]v(?:-|$) 要求 v 前是数字、后接结尾或连字符，因此不会把 deepseek-v4-flash 的「-v4」误判成视觉。
-const guessModelType = (id: string): 'text' | 'vision' => {
-  return /vision|-vl|vl-|-4v|4v-|image|omni|[0-9]v(?:-|$)/i.test(id) ? 'vision' : 'text'
-}
-
-// 每次打开时默认勾选全部新模型，并初始化类型
+// 每次打开时默认勾选当前页签下的全部新模型，并初始化类型
 watch(() => props.visible, (v) => {
   if (v) {
     searchQuery.value = ''
-    selectedIds.value = props.items.filter(i => !i.exists).map(i => i.id)
+    showAll.value = false
+    const scoped = props.items.filter(i => matchesTarget(i.id))
+    selectedIds.value = scoped.filter(i => !i.exists).map(i => i.id)
     const types: Record<string, 'text' | 'vision'> = {}
-    for (const item of props.items) types[item.id] = guessModelType(item.id)
+    for (const item of props.items) types[item.id] = guessModelCategory(item.id)
     modelTypes.value = types
   }
 })
@@ -108,12 +142,18 @@ const setModelType = (id: string, type: 'text' | 'vision') => {
   modelTypes.value[id] = type
 }
 
+// 只勾选当前可见（匹配页签）的新模型，避免把被过滤掉的模型静默加进来
 const selectAll = () => {
-  selectedIds.value = props.items.filter(i => !i.exists).map(i => i.id)
+  selectedIds.value = scopedItems.value.filter(i => !i.exists).map(i => i.id)
 }
 
 const clearAll = () => {
   selectedIds.value = []
+}
+
+const toggleShowAll = () => {
+  showAll.value = !showAll.value
+  // 解除过滤时不自动勾选新出现的模型，交由用户决定
 }
 
 const handleConfirm = () => {
@@ -215,6 +255,16 @@ const handleOverlayClick = (event: MouseEvent) => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.fetch-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 18px 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .fetch-item {

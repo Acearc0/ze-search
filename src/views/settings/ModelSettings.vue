@@ -228,17 +228,12 @@
                   <path d="M544.256 480.256h307.2a32.256 32.256 0 0 1 0 64h-307.2v307.2a32.256 32.256 0 0 1-64 0v-307.2h-307.2a32.256 32.256 0 1 1 0-64h307.2v-307.2a32.256 32.256 0 1 1 64 0z" fill="currentColor"/>
                 </svg>
               </button>
-              <!-- 自动拉取模型按钮：仅在「文本」页签可用。
-                   /models 接口返回的是平台全量模型，无法按识图能力区分，
-                   在视觉/总结页签拉取会把纯文本模型混进视觉池；
-                   视觉与总结只需在已拉取的模型里勾选兼任（见 filteredModels）。 -->
+              <!-- 自动拉取模型按钮：三个页签均可用，弹窗只显示与当前页签匹配的模型 -->
               <button
                 class="icon-action-btn icon-action-btn--add"
-                :disabled="fetchModelsLoading || !selectedPlatform?.baseUrl || selectedCategory !== 'text'"
+                :disabled="fetchModelsLoading || !selectedPlatform?.baseUrl"
                 @click="fetchModelsFromPlatform"
-                :title="selectedCategory === 'text'
-                  ? '从供应商接口自动拉取模型列表（GET {Base URL}/v1/models）'
-                  : `自动拉取仅在「文本」页签可用；${selectedCategory === 'vision' ? '识图' : '总结'}模型请在「文本」页签拉取后，回到本页签勾选要兼任的模型`"
+                :title="`从供应商接口自动拉取模型列表（GET {Base URL}/v1/models），仅列出${selectedCategory === 'vision' ? '识图' : '文本'}模型`"
               >
                 <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
                   <path d="M192 384a32 32 0 0 1 32 32v288a64 64 0 0 0 64 64h448a64 64 0 0 0 64-64V416a32 32 0 1 1 64 0v288a128 128 0 0 1-128 128H288a128 128 0 0 1-128-128V416a32 32 0 0 1 32-32zm320-288a32 32 0 0 1 32 32v329.4l100.7-100.7a32 32 0 0 1 45.2 45.2L534.6 557.2a32 32 0 0 1-45.2 0L334.1 401.9a32 32 0 0 1 45.2-45.2L480 457.4V128a32 32 0 0 1 32-32z" fill="currentColor"/>
@@ -384,6 +379,7 @@
     <FetchModelsDialog
       :visible="showFetchModelsDialog"
       :items="fetchedModels"
+      :category="selectedCategory"
       @confirm="addFetchedModels"
       @cancel="showFetchModelsDialog = false"
     />
