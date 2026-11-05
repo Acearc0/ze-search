@@ -131,13 +131,13 @@
     <div class="setting-item">
       <div class="setting-info">
         <h3 class="setting-title">第三模型（仲裁模型）</h3>
-        <p class="setting-description">懒投票下前两个模型答案不一致时，仅调用该模型参与投票取多数票；不指定则调用其余已选模型共同投票。与已选文本模型重复时自动忽略。</p>
+        <p class="setting-description">懒投票下前两个模型答案不一致时，仅调用该模型参与投票取多数票；不指定则调用其余已选模型共同投票。与已选文本模型重复时自动忽略。<br>注意：仲裁调用只发送题目文本，不会把图片传给模型，所以「识图模型」在这里并不会真的看图。含图片的题目走独立的图片题路径，只调用设置好的单个「视觉模型」，不参与多模型投票与仲裁。</p>
       </div>
       <div class="setting-control">
         <select class="form-input" :value="settings.arbitrationModelId ?? ''"
           @change="handleSettingChange('arbitrationModelId', ($event.target as HTMLSelectElement).value || null)">
           <option value="">不指定（其余已选模型共同投票）</option>
-          <option v-for="m in arbitrationCandidates" :key="m.id" :value="m.id">{{ m.displayName }}</option>
+          <option v-for="m in arbitrationCandidates" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
       </div>
     </div>
@@ -375,11 +375,24 @@ const openCacheFolder = async () => {
 // 设置管理
 const { settings, saveSettings, setSetting } = useSettingsManager()
 
-// 多模型答题：第三模型（仲裁模型）候选列表 = 所有已启用模型（不限分类）
+// 多模型答题：第三模型（仲裁模型）候选 = 所有已启用模型（不限分类）
+// 不按 category 过滤：category 是界面分组标签而非能力声明，被标为 vision 的模型
+// 往往也能答文本题；且运行时的仲裁查找（Home.vue）本就不看分类，
+// 过滤会造成「已选模型在下拉里显示为空」的状态错位。
 const modelConfigStore = useModelConfig()
-const arbitrationCandidates = computed(() =>
-  (modelConfigStore.platforms?.value || []).flatMap(p => (p.models || []).filter(m => m.enabled))
-)
+
+const arbitrationCandidates = computed(() => {
+  const list: { id: string; label: string }[] = []
+  for (const platform of modelConfigStore.platforms?.value || []) {
+    const platformName = platform.displayName || platform.name || ''
+    for (const model of platform.models || []) {
+      if (!model.enabled) continue
+      list.push({ id: model.id, label: `${model.displayName}（${platformName}）` })
+    }
+  }
+  return list
+})
+
 const canOpenQuestionSaveFolder = computed(() => settings.value.questionSaveFolderId !== null && settings.value.questionSaveFolderId !== undefined)
 
 
