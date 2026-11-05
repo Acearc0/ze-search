@@ -53,16 +53,33 @@ jobs:
         shell: pwsh
         run: |
           $sha = (& git rev-parse --short=7 HEAD).Trim()
-          if (-not $sha) { Write-Error "无法获取 commit 短哈希"; exit 1 }
+          if ($sha -notmatch '^[0-9a-f]{7,40}(-dirty)?$') { Write-Error "commit 短哈希异常: '$sha'"; exit 1 }
           $ver = (& node -e "console.log(require('./src-tauri/tauri.conf.json').version)").Trim()
-          if (-not $ver) { Write-Error "无法读取 tauri.conf.json 的 version"; exit 1 }
-          $dir = "src-tauri/target/release/bundle/nsis"
-          $exe = Get-ChildItem -Path $dir -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $exe) { Write-Error "未在 $dir 找到 NSIS 安装包"; exit 1 }
-          $newName = "$($exe.BaseName)-$sha.exe"
+          if ($ver -notmatch '^\d+\.\d+\.\d+') { Write-Error "tauri.conf.json 的 version 异常: '$ver'"; exit 1 }
+
+          $dir = Join-Path 'src-tauri' 'target/release/bundle/nsis'
+          if (-not (Test-Path $dir)) { Write-Error "目录不存在: $dir"; exit 1 }
+          # rust-cache 会缓存整个 src-tauri/target，可能残留历史构建的旧安装包。
+          # 只认名字里含当前版本号的产物，避免把上一次构建的包改名上传。
+          $candidates = @(Get-ChildItem -Path $dir -Filter "*$ver*-setup.exe" -ErrorAction SilentlyContinue)
+          if ($candidates.Count -eq 0) { $candidates = @(Get-ChildItem -Path $dir -Filter *.exe -ErrorAction SilentlyContinue) }
+          if ($candidates.Count -eq 0) { Write-Error "未在 $dir 找到 NSIS 安装包"; exit 1 }
+          if ($candidates.Count -gt 1) {
+            Write-Host "发现多个候选安装包，取最近构建的一个（其余为缓存残留）："
+            $candidates | ForEach-Object { Write-Host "  - $($_.Name)" }
+          }
+          $exe = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+          # Tauri 默认名形如 "ZError Search_2.2.7_x64-setup.exe"，含空格，
+          # 下载后在命令行里很难处理，这里统一换成确定性的无空格名字。
+          $arch = if ($exe.BaseName -match '(x64|arm64|i686)') { $Matches[1] } else { 'x64' }
+          $newName = "zerror-search-$ver-$sha-$arch-setup.exe"
+          if ($newName -match ' ') { Write-Error "生成的文件名含空格: $newName"; exit 1 }
           Rename-Item -LiteralPath $exe.FullName -NewName $newName
-          Write-Host "安装包已重命名: $newName"
-          "file=$dir/$newName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "安装包: $($exe.Name) -> $newName"
+
+          $out = Join-Path $dir $newName
+          "file=$out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "ver=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
