@@ -86,9 +86,11 @@ const filteredItems = computed(() => {
   return q ? props.items.filter(i => i.id.toLowerCase().includes(q)) : props.items
 })
 
-// 按常见命名启发式预判模型类型（vl/vision/4v/image/omni → 视觉），用户可逐行修改
+// 按常见命名启发式预判模型类型，用户可逐行修改。
+// 视觉信号：vl / vision / 4v / image / omni，以及「数字+v」形态（glm-4.6v、glm-5v-turbo）。
+// [0-9]v(?:-|$) 要求 v 前是数字、后接结尾或连字符，因此不会把 deepseek-v4-flash 的「-v4」误判成视觉。
 const guessModelType = (id: string): 'text' | 'vision' => {
-  return /vision|-vl|vl-|-4v|4v-|image|omni/i.test(id) ? 'vision' : 'text'
+  return /vision|-vl|vl-|-4v|4v-|image|omni|[0-9]v(?:-|$)/i.test(id) ? 'vision' : 'text'
 }
 
 // 每次打开时默认勾选全部新模型，并初始化类型

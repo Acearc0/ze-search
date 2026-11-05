@@ -506,7 +506,13 @@ class ModelConfigManager {
     const enabledModels = allModels.filter(model => model.enabled !== false)
     const textModelIds = new Set(enabledModels.filter(model => model.category === 'text').map(model => model.id))
     const summaryModelIds = new Set(enabledModels.map(model => model.id))
-    const visionModelIds = new Set(enabledModels.filter(model => model.category === 'vision').map(model => model.id))
+    // 视觉允许文本模型兼任（与 getSelectedVisionModel、首页选择器一致）：
+    // 这里若只收 category==='vision'，会把用户选好的文本模型在下次启动时静默清空
+    const visionModelIds = new Set(
+      enabledModels
+        .filter(model => model.category === 'vision' || model.category === 'text')
+        .map(model => model.id)
+    )
 
     const normalizedTextModels = this.dedupeAndFilterModelIds(
       [

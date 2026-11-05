@@ -228,12 +228,17 @@
                   <path d="M544.256 480.256h307.2a32.256 32.256 0 0 1 0 64h-307.2v307.2a32.256 32.256 0 0 1-64 0v-307.2h-307.2a32.256 32.256 0 1 1 0-64h307.2v-307.2a32.256 32.256 0 1 1 64 0z" fill="currentColor"/>
                 </svg>
               </button>
-              <!-- 自动拉取模型按钮 -->
+              <!-- 自动拉取模型按钮：仅在「文本」页签可用。
+                   /models 接口返回的是平台全量模型，无法按识图能力区分，
+                   在视觉/总结页签拉取会把纯文本模型混进视觉池；
+                   视觉与总结只需在已拉取的模型里勾选兼任（见 filteredModels）。 -->
               <button
                 class="icon-action-btn icon-action-btn--add"
-                :disabled="fetchModelsLoading || !selectedPlatform?.baseUrl"
+                :disabled="fetchModelsLoading || !selectedPlatform?.baseUrl || selectedCategory !== 'text'"
                 @click="fetchModelsFromPlatform"
-                title="从供应商接口自动拉取模型列表（GET {Base URL}/v1/models）"
+                :title="selectedCategory === 'text'
+                  ? '从供应商接口自动拉取模型列表（GET {Base URL}/v1/models）'
+                  : `自动拉取仅在「文本」页签可用；${selectedCategory === 'vision' ? '识图' : '总结'}模型请在「文本」页签拉取后，回到本页签勾选要兼任的模型`"
               >
                 <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
                   <path d="M192 384a32 32 0 0 1 32 32v288a64 64 0 0 0 64 64h448a64 64 0 0 0 64-64V416a32 32 0 1 1 64 0v288a128 128 0 0 1-128 128H288a128 128 0 0 1-128-128V416a32 32 0 0 1 32-32zm320-288a32 32 0 0 1 32 32v329.4l100.7-100.7a32 32 0 0 1 45.2 45.2L534.6 557.2a32 32 0 0 1-45.2 0L334.1 401.9a32 32 0 0 1 45.2-45.2L480 457.4V128a32 32 0 0 1 32-32z" fill="currentColor"/>
@@ -245,7 +250,7 @@
           <div v-if="selectedCategory === 'text' || selectedCategory === 'summary' || selectedCategory === 'vision'" class="model-list-hint">
             <template v-if="selectedCategory === 'text'">可多选，最多 5 个（已选 {{ currentMultiModels.length }}/5）</template>
             <template v-else-if="selectedCategory === 'summary'">单选，再点一次可取消选择</template>
-            <template v-else>单选，再点一次可取消选择</template>
+            <template v-else>单选，再点一次可取消选择；支持识图的模型与可兼任识图的文本模型都在此列出</template>
           </div>
           <div class="model-list">
             <div 
@@ -629,7 +634,10 @@ const filteredModels = computed(() => {
     return models.filter(model => model.category === 'text')
   }
   
-  return models.filter(model => model.category === 'vision')
+  // 视觉页签同时列出文本模型：与首页模型选择器一致，允许同一模型兼任文本与视觉。
+  // 只列 category==='vision' 会造成死锁——文本模型在拉取弹窗里标「已存在」不可选，
+  // 这里又看不到它，用户没有任何入口把它设为识图模型。
+  return models.filter(model => model.category === 'vision' || model.category === 'text')
 })
 
 const isSelectedPlatformDisabled = computed(() => selectedPlatform.value?.enabled === false)
@@ -2642,6 +2650,18 @@ input[type="password"].api-key-input::-ms-reveal {
 .icon-action-btn:hover {
   background-color: var(--platform-config-toggle-button-hover-bg);
   color: var(--text-primary);
+}
+
+/* 禁用态：置灰且取消 hover 反馈，让「不可用」看得出来 */
+.icon-action-btn:disabled {
+  color: var(--text-secondary);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-action-btn:disabled:hover {
+  background-color: var(--platform-config-toggle-button-bg);
+  color: var(--text-secondary);
 }
 
 .icon-action-btn--ghost {
