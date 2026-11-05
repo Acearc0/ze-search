@@ -92,6 +92,21 @@ const toHalfwidth = (text: string): string =>
   text.replace(/[，。：；！（）【】〔〕“”‘’、　]/g, (ch) => FULLWIDTH_TO_HALFWIDTH[ch] ?? ch)
 
 /**
+ * 组装「全部模型失败」时的输出文本。
+ *
+ * 必须带 `错误:` 前缀：Rust 侧 `is_model_error` 只认前缀（server.rs），
+ * 而多模型失败详情是 `[模型名]\n错误: …` 拼接串，会被前缀检查绕过，
+ * 进而被当作正常答案提取、入库（实测题库 ID 31 即为此类脏数据）。
+ * 已带前缀的内容原样返回，避免二次包裹。
+ */
+export const buildAllFailureOutput = (detail: string): string => {
+  const text = (detail || '').trim()
+  if (!text) return '错误: 未获得任何模型响应'
+  if (/^错误\s*[:：]/.test(text) || /^Error\s*:/i.test(text)) return text
+  return `错误: 所有模型调用失败\n${text}`
+}
+
+/**
  * 剥离答案尾部的引用来源。
  *
  * 背景：联网搜索的引导语曾要求模型「在 answer 正文末尾追加来源」，导致来源被写进答案，

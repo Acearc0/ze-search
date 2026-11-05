@@ -550,7 +550,7 @@ import {
   resolveUrlAnswer,
 } from '../utils/urlQuestion'
 import { normalizeAnswerJsonContent } from '../utils/answerNormalize'
-import { buildAnswerCompareKey, extractAnswerFromMixedContent } from '../utils/answerExtract'
+import { buildAnswerCompareKey, extractAnswerFromMixedContent, buildAllFailureOutput } from '../utils/answerExtract'
 import { buildAnswerChatMessages } from '../utils/answerFewShot'
 
 
@@ -3054,10 +3054,13 @@ ${baseCombinedResponse}
         )
       } else {
         // 总结全失败：优先用基础模型成功答案，否则展示总结/基础模型的真实报错
+        // 全失败时必须带 `错误:` 前缀，否则 Rust 的 is_model_error 前缀检查会被
+        // `[模型名]` 绕过，把报错详情当答案入库（见 utils/answerExtract.ts）
         finalOutput = majorityBaseAnswer
-          || formatModelOutputs(summaryResults)
-          || formatModelOutputs(results)
-          || '错误: 未获得任何模型响应'
+          ? majorityBaseAnswer
+          : buildAllFailureOutput(
+              formatModelOutputs(summaryResults) || formatModelOutputs(results)
+            )
       }
 
       const finalReasoning = successfulSummaryEntries.length === 1
@@ -3075,9 +3078,10 @@ ${baseCombinedResponse}
       }
     } else {
       // 无总结模型：成功则返回成功内容；全部失败则返回各模型真实报错
+      // 全失败同样必须带 `错误:` 前缀，避免被 Rust 当作答案入库
       finalOutput = successfulModels.length > 0
         ? formatModelOutputs(successfulBaseEntries)
-        : (formatModelOutputs(results) || '错误: 未获得任何模型响应')
+        : buildAllFailureOutput(formatModelOutputs(results))
       const finalReasoning = successfulModels.length === 1
         ? getRequestReasoningForBackend(requestId, successfulModels[0].id)
         : ''
