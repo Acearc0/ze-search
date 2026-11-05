@@ -195,6 +195,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 type CSSProperties = Record<string, string>
 import { environmentDetector } from '../../services/environmentDetector'
 import { getVersion } from '@tauri-apps/api/app'
+import { formatDisplayVersion } from '../../utils/buildInfo'
 
 const currentVersion = ref('')
 
@@ -619,7 +620,10 @@ const heatmapMonthMarkers = computed<HeatmapMonthMarker[]>(() => {
 
 
 onMounted(() => {
-  getVersion().then(v => { currentVersion.value = v }).catch(() => { currentVersion.value = '2.2.7' })
+  // 运行时版本号 + 构建期注入的 commit/构建时间；拿不到 commit 时只显示版本号
+  getVersion()
+    .then(v => { currentVersion.value = formatDisplayVersion(v) })
+    .catch(() => { currentVersion.value = formatDisplayVersion() })
   checkEnvironment()
   syncThemeState()
   scheduleHeatmapContainerWidthSync()

@@ -43,9 +43,32 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build --bundles nsis
 
+      # 安装包与产物名都带上 commit 短哈希：tauri.conf.json 的 version 长期不变，
+      # 否则下载下来分不清是哪次提交构建的。不改 version 字段本身，
+      # 以免影响升级检测与「添加/删除程序」里的条目名称。
+      # --short=7 必须与 vite.config.ts 的 readGitCommit 一致，
+      # 否则关于页显示的哈希对不上产物文件名。
+      - name: Tag installer with commit
+        id: pkg
+        shell: pwsh
+        run: |
+          $sha = (& git rev-parse --short=7 HEAD).Trim()
+          if (-not $sha) { Write-Error "无法获取 commit 短哈希"; exit 1 }
+          $ver = (& node -e "console.log(require('./src-tauri/tauri.conf.json').version)").Trim()
+          if (-not $ver) { Write-Error "无法读取 tauri.conf.json 的 version"; exit 1 }
+          $dir = "src-tauri/target/release/bundle/nsis"
+          $exe = Get-ChildItem -Path $dir -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $exe) { Write-Error "未在 $dir 找到 NSIS 安装包"; exit 1 }
+          $newName = "$($exe.BaseName)-$sha.exe"
+          Rename-Item -LiteralPath $exe.FullName -NewName $newName
+          Write-Host "安装包已重命名: $newName"
+          "file=$dir/$newName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ver=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: zerror-search-windows-installer
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          name: zerror-search-${{ steps.pkg.outputs.ver }}-${{ steps.pkg.outputs.sha }}
+          path: ${{ steps.pkg.outputs.file }}
           if-no-files-found: error
