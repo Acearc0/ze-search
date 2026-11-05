@@ -4,6 +4,16 @@ on:
   push:
     branches:
       - master
+    # 这些路径的改动不会改变安装包内容，跳过构建以省时间（实测一次构建约 5.5 分钟，
+    # 其中 4.8 分钟是 Rust 编译 + NSIS 打包，与文档/测试无关）。
+    # 注意：paths-ignore 只在 push 事件生效，workflow_dispatch 手动触发不受影响，
+    # 需要强制构建时手动跑一次即可。
+    # 本 workflow 自身不在忽略列表内——改构建配置必须能立刻验证。
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'tests/**'
+      - '.gitignore'
   workflow_dispatch:
 
 jobs:
