@@ -2870,7 +2870,7 @@ const callModelAPI = async (requestId: string, query: string) => {
         // 传入选项与题型：多选题的 ### 片段顺序无关，选项字母前缀需与输出规范化同样剥离
         const compareOpts: CompareKeyOptions = {
           options: getRequestOptionsFromLog(requestId),
-          unordered: isOrderInsensitiveType(getRequestTypeFromLog(requestId))
+          unordered: isOrderInsensitiveAnswer(query, requestId)
         }
         const k1 = r1 && r1.success ? normalizeAnswerForComparison(r1.response, compareOpts) : ''
         const k2 = r2 && r2.success ? normalizeAnswerForComparison(r2.response, compareOpts) : ''
@@ -3201,9 +3201,17 @@ const getRequestTypeFromLog = (requestId: string): string => getRequestFieldFrom
 /**
  * 答案的 ### 片段是否与顺序无关。
  * 依据 OCS 源码：resolveMultiple 逐片段独立匹配选项（顺序无关），
- * resolveCompletion 按索引对应空位（顺序有语义，「北京###上海」不可乱序）。
+ * resolveCompletion 按索引对应空位（顺序有语义，「预攻击###攻击###后攻击」不可乱序）。
+ *
+ * 题型有两个来源，任一命中即视为多选：
+ * 1. query 文本里的【题目类型：多选题】——Rust build_model_query_prompt 拼入，必然存在；
+ * 2. 请求体的 type 字段——「完成阶段无 started 记录」时 requestBody 会被置空，单独依赖会静默失效。
+ * 以 query 为主、type 为辅。
  */
 const isOrderInsensitiveType = (type: string): boolean => /multiple|多选/i.test(type || '')
+const isOrderInsensitiveQuery = (query: string): boolean => /题目类型[：:]\s*多选/.test(query || '')
+const isOrderInsensitiveAnswer = (query: string, requestId: string): boolean =>
+  isOrderInsensitiveQuery(query) || isOrderInsensitiveType(getRequestTypeFromLog(requestId))
 
 // 发送模型响应到后端
 const applyLocalRequestCompletion = (
