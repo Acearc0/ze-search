@@ -5,7 +5,9 @@ import { modelConfigManager } from '../../../services/model/config'
 import {
   fetchBailianModels,
   diffFetchedModels,
+  normalizeKey,
   type FetchedModel,
+  type FetchedModelRow,
   type SkippedModel
 } from '../../../services/model/fetchModels'
 
@@ -21,6 +23,8 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
   /** 诊断：被能力标签跳过的模型明细 */
   const fetchSkipped = ref<SkippedModel[]>([])
   const added = ref<FetchedModel[]>([])
+  /** 全部拉取结果，带「已添加」标记；对话框按这个渲染完整列表 */
+  const fetchRows = ref<FetchedModelRow[]>([])
   const expired = ref<string[]>([])
 
   /** 默认模型参数（与官方 addModel 的默认值保持一致；category 与 AIModel 同域） */
@@ -46,6 +50,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
     fetchModelCount.value = 0
     fetchSkipped.value = []
     added.value = []
+    fetchRows.value = []
     expired.value = []
     dialogVisible.value = true
     fetching.value = true
@@ -72,6 +77,12 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
       }
 
       const existing = (platform.models || []).map(m => m.modelId || m.displayName || m.id)
+      const existingKeys = new Set(existing.map(normalizeKey))
+      // 完整列表 + 已添加标记：已添加的在对话框里显示为勾选且不可重复添加
+      fetchRows.value = result.models.map(model => ({
+        ...model,
+        existing: existingKeys.has(normalizeKey(model.id))
+      }))
       const diff = diffFetchedModels(result.models, existing)
       added.value = diff.added
       // 只把"本平台管理的"模型视为可清理对象；远程同步模型（isRemote）永不建议删除
@@ -119,6 +130,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
   return {
     dialogVisible, fetching, fetchError, fetchEndpoint,
     fetchTotal, fetchFilteredOut, fetchModelCount, fetchSkipped,
+    fetchRows,
     added, expired, canFetch,
     openFetchDialog, closeFetchDialog, applyFetchResult
   }

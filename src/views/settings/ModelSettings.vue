@@ -396,7 +396,7 @@
     <!-- 从 API 拉取模型结果 -->
     <FetchModelsDialog
       :visible="dialogVisible"
-      :added="added"
+      :fetched="fetchRows"
       :expired="expired"
       :endpoint="fetchEndpoint"
       :error="fetchError"
@@ -530,7 +530,8 @@ const {
 const {
   dialogVisible, fetching, fetchError, fetchEndpoint,
   fetchTotal, fetchFilteredOut, fetchModelCount, fetchSkipped,
-  added, expired, canFetch,
+  fetchRows,
+  expired, canFetch,
   openFetchDialog, closeFetchDialog, applyFetchResult,
 } = useFetchModels(selectedPlatform)
 

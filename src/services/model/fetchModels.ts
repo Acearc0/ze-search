@@ -40,6 +40,11 @@ export interface SkippedModel {
   capabilities: string[]
 }
 
+/** 拉取结果 + 该模型是否已在平台里（对话框据此打勾） */
+export interface FetchedModelRow extends FetchedModel {
+  existing: boolean
+}
+
 const VISION_CODES = new Set(['VU', 'Multimodal-Omni', 'Realtime-Omni'])
 const CHAT_CODES = new Set(['TG', 'VU', 'Reasoning', 'Multimodal-Omni', 'Realtime-Omni', 'Realtime-Chatting'])
 
@@ -57,7 +62,8 @@ export const guessCategory = (id: string): ModelCategory => {
   return 'text'
 }
 
-const normalizeKey = (id: string): string =>
+/** 模型 id 归一化：用于和已配置模型比对（去 cmaas- 前缀、统一小写） */
+export const normalizeKey = (id: string): string =>
   String(id || '').trim().toLowerCase().replace(/^cmaas-/, '')
 
 /** 单个百炼模型对象 → FetchedModel；非对话模型 / 无能力标签返回 null */
