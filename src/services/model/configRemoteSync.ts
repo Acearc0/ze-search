@@ -171,7 +171,11 @@ export async function synchronizeRemoteCatalog(context: RemoteCatalogContext): P
           temperature: rm.temperature ?? 0.7,
           topP: rm.topP ?? 0.9,
           category: 'text',
-          hasVision: resolveRemoteHasVision(rm as AIModel & Record<string, unknown>),
+          // 本机已显式设置过的优先保留：用户可手动把多模态模型标记为视觉，
+          // 否则每次同步都会被远程下发值覆盖，表现为「视觉开关改了没用」
+          hasVision: typeof existingModel?.hasVision === 'boolean'
+            ? existingModel.hasVision
+            : resolveRemoteHasVision(rm as AIModel & Record<string, unknown>),
           enableThinking: typeof existingModel?.enableThinking === 'boolean'
             ? existingModel.enableThinking
             : (rm.enableThinking ?? isKnownThinkingModel),

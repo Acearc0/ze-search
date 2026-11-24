@@ -98,15 +98,15 @@
             <div class="form-group">
               <label class="form-label form-label--row">
                 <span>视觉能力</span>
-                <label class="switch-toggle" :class="{ disabled: isRemote }">
-                  <input type="checkbox" v-model="formData.hasVision" :disabled="isRemote" />
+                <label class="switch-toggle">
+                  <input type="checkbox" v-model="formData.hasVision" />
                   <span class="switch-slider"></span>
                 </label>
               </label>
               <p class="form-hint">
                 {{ isRemote
-                  ? '远程模型的视觉能力由管理员下发，本地不可修改。'
-                  : '开启后，该模型会出现在视觉模型列表中，可用于图片理解。' }}
+                  ? '多模态模型可同时作为文本模型与视觉模型使用。此处修改优先于远程下发值，同步时不会被覆盖。'
+                  : '开启后，该模型可用于图片理解（区分图片题）；关闭则只作文本模型。' }}
               </p>
             </div>
 

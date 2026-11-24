@@ -777,6 +777,12 @@ input[type="password"].api-key-input::-ms-reveal {
   background: color-mix(in srgb, #f8bd40 28%, transparent);
 }
 
+/* 文本能力标签：与视觉标签用不同色区分，多模态模型两个都会显示 */
+.model-kind-tag--text {
+  color: #1677ff;
+  background: color-mix(in srgb, #1677ff 18%, transparent);
+}
+
 .model-actions {
   display: flex;
   align-items: center;
