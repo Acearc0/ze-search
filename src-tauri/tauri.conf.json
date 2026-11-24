@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ZError",
+  "productName": "ZError Search",
   "version": "2.3.0",
-  "identifier": "com.zerror.app",
+  "identifier": "com.zerror.search",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
