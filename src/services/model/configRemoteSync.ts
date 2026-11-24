@@ -126,7 +126,9 @@ export async function synchronizeRemoteCatalog(context: RemoteCatalogContext): P
       const apiProtocolOverride = existing?.apiProtocolOverride
       const platformProtocol = apiProtocolOverride ?? remoteApiProtocol
 
-      const remoteModels: AIModel[] = (rp.models || []).map(rm => {
+      // 用户主动删除过的远程/预置模型：同步时不再下发，避免「删了又回来」
+      const deletedModelIds = new Set(settings.deletedPredefinedModels ?? [])
+      const remoteModels: AIModel[] = (rp.models || []).filter(rm => !deletedModelIds.has(rm.id)).map(rm => {
         // 自动检测思考模型：根据模型名称/ID 包含关键词时默认开启思考
         const runtimeModelId = (rm.modelId || rm.id || '').toLowerCase()
         const modelIdLower = (rm.id || '').toLowerCase()

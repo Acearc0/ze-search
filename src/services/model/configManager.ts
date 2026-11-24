@@ -642,9 +642,17 @@ class ModelConfigManager {
     for (const platform of this.settings.platforms) {
       const index = platform.models.findIndex(m => m.id === modelId)
       if (index !== -1) {
+        const removed = platform.models[index]
         // 替换选中状态（若被选中，自动切换到同平台同类型的另一个模型）
         this._replaceSelectedModel(modelId, platform.id)
         platform.models.splice(index, 1)
+        // 远程/预置模型：记入黑名单，否则下次同步会重新下发（「删了又回来」）
+        if (removed?.isRemote) {
+          if (!this.settings.deletedPredefinedModels) this.settings.deletedPredefinedModels = []
+          if (!this.settings.deletedPredefinedModels.includes(modelId)) {
+            this.settings.deletedPredefinedModels.push(modelId)
+          }
+        }
         break
       }
     }

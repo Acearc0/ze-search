@@ -80,8 +80,56 @@ export const parseCompatibleModels = (json: unknown): FetchedModel[] | null => {
   return result.length ? result : null
 }
 
-const joinUrl = (base: string, path: string): string =>
-  `${String(base || '').replace(/\/+$/, '')}${path}`
+/**
+ * 生成候选 URL 列表。
+ * 各家 Base URL 写法不一（含/不含 /v1、含/不含 /compatible-mode），
+ * 逐个尝试比硬拼一条更可靠——之前只拼 '/models' 导致
+ * https://xxx/compatible-mode/models（缺 /v1）全部 404。
+ */
+const buildCandidates = (base: string): { native: string[]; compatible: string[] } => {
+  const b = String(base || '').trim().replace(/\/+$/, '')
+  // 去掉尾部 /v1 或 /compatible-mode，得到 host 级前缀
+  const stripped = b.replace(/\/compatible-mode\/v1$/i, '').replace(/\/compatible-mode$/i, '')
+  const hostRoot = stripped.replace(/\/v1$/i, '')
+  const hasV1 = /\/v1$/i.test(b)
+
+  const native = [
+    `${hostRoot}/api/v1/models?page_no=1&page_size=100`,
+    `${hostRoot}/api/v1/models`,
+  ]
+
+  // 兼容端点：base 已含 /v1 时直接拼 /models；否则补 /v1/models
+  const compatible = hasV1
+    ? [`${b}/models`]
+    : [`${b}/v1/models`, `${b}/models`]
+
+  return { native, compatible }
+}
+
+const tryFetchModels = async (
+  fetchFn: typeof fetch,
+  urls: string[],
+  headers: Record<string, string>,
+  parse: (json: unknown) => FetchedModel[] | null,
+  signal?: AbortSignal
+): Promise<{ models: FetchedModel[] | null; statuses: string[] }> => {
+  const statuses: string[] = []
+  for (const url of urls) {
+    try {
+      const resp = await fetchFn(url, { headers, signal })
+      if (!resp.ok) {
+        statuses.push(`${new URL(url).pathname} → HTTP ${resp.status}`)
+        continue
+      }
+      const parsed = parse(await resp.json())
+      if (parsed) return { models: parsed, statuses }
+      statuses.push(`${new URL(url).pathname} → 结构不符`)
+    } catch (e) {
+      statuses.push(`${url.replace(/\?.*$/, '')} → ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return { models: null, statuses }
+}
 
 const getFetch = async (): Promise<typeof fetch> => {
   try {
@@ -93,7 +141,8 @@ const getFetch = async (): Promise<typeof fetch> => {
 }
 
 /**
- * 拉取百炼模型列表：先试原生端点拿 capabilities，失败回退兼容端点。
+ * 拉取模型列表：先试百炼原生端点拿 capabilities，失败回退 OpenAI 兼容端点。
+ * 每家 Base URL 写法不同，候选 URL 逐个探测。
  * @param baseUrl 平台 Base URL（如 https://xxx.cn-beijing.maas.aliyuncs.com/compatible-mode）
  * @param apiKey  API Key
  */
@@ -103,42 +152,30 @@ export const fetchBailianModels = async (
   signal?: AbortSignal
 ): Promise<FetchModelsResult> => {
   const fetchFn = await getFetch()
-  const base = String(baseUrl || '').trim()
   const key = String(apiKey || '').trim()
   const headers: Record<string, string> = {
     Authorization: `Bearer ${key}`,
     'Content-Type': 'application/json'
   }
 
-  // 百炼原生端点：把 /compatible-mode 换成 /api/v1
-  const nativeBase = base.replace(/\/compatible-mode\/?$/, '') || base
-  const nativeUrl = joinUrl(nativeBase, '/api/v1/models?page_no=1&page_size=200')
+  const { native, compatible } = buildCandidates(baseUrl)
 
-  let nativeError = ''
-  try {
-    const resp = await fetchFn(nativeUrl, { headers, signal })
-    if (resp.ok) {
-      const parsed = parseNativeModels(await resp.json())
-      if (parsed) return { models: parsed, endpoint: 'native' }
-      nativeError = '原生端点返回结构不符'
-    } else {
-      nativeError = `原生端点 HTTP ${resp.status}`
+  const nativeTry = await tryFetchModels(fetchFn, native, headers, parseNativeModels, signal)
+  if (nativeTry.models) return { models: nativeTry.models, endpoint: 'native' }
+
+  const compatibleTry = await tryFetchModels(fetchFn, compatible, headers, parseCompatibleModels, signal)
+  if (compatibleTry.models) {
+    return {
+      models: compatibleTry.models,
+      endpoint: 'compatible',
+      error: nativeTry.statuses.length ? `原生端点不可用（${nativeTry.statuses.join('；')}）` : undefined
     }
-  } catch (e) {
-    nativeError = e instanceof Error ? e.message : String(e)
   }
 
-  // 回退：OpenAI 兼容端点
-  const compatibleUrl = joinUrl(base, '/models')
-  try {
-    const resp = await fetchFn(compatibleUrl, { headers, signal })
-    if (!resp.ok) throw new Error(`兼容端点 HTTP ${resp.status}`)
-    const parsed = parseCompatibleModels(await resp.json())
-    if (!parsed) throw new Error('兼容端点返回结构不符')
-    return { models: parsed, endpoint: 'compatible', error: nativeError }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { models: [], endpoint: 'compatible', error: `${nativeError}；${msg}` }
+  return {
+    models: [],
+    endpoint: 'compatible',
+    error: `全部端点失败 — 原生：${nativeTry.statuses.join('；') || '无响应'}；兼容：${compatibleTry.statuses.join('；') || '无响应'}`
   }
 }
 

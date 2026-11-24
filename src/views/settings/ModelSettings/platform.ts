@@ -244,7 +244,9 @@ export const bindPlatformOps = (ctx: PlatformOpsCtx) => {
   }
 
   const handleDeleteModel = async () => {
-    if (contextMenuModel.value && !contextMenuModel.value.isRemote) {
+    // 远程/预置模型也允许删除：removeModel 会记入 deletedPredefinedModels，
+    // 下次同步不再下发，因此不会「删了又回来」
+    if (contextMenuModel.value) {
       deleteModelName.value = contextMenuModel.value.displayName || contextMenuModel.value.id
       deleteModelId.value = contextMenuModel.value.id
       showDeleteModelDialog.value = true
