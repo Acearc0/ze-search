@@ -8,11 +8,9 @@ on:
         default: false
   workflow_dispatch:
   push:
-    branches: [dev-improvements]
-    paths:
-      - '.github/workflows/build-desktop.yml'
-      - 'src/composables/useAppUpdate.ts'
-      - 'src/components/ui/UpdateDialog.vue'
+    # v23-custom-search：定制分支（免费引擎搜索 + 供应商模型拉取），
+    # 需要能直接出安装包验证，故不加 paths 白名单限制。
+    branches: [dev-improvements, v23-custom-search]
 
 permissions:
   contents: read
