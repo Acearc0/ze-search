@@ -31,6 +31,13 @@ export interface FetchModelsResult {
   total?: number
   /** 诊断：被能力标签过滤掉（生图/TTS/向量等非对话）的条数 */
   filteredOut?: number
+  /** 诊断：被跳过的模型明细，便于核对某个模型到底是「没返回」还是「被过滤」 */
+  skipped?: SkippedModel[]
+}
+
+export interface SkippedModel {
+  id: string
+  capabilities: string[]
 }
 
 const VISION_CODES = new Set(['VU', 'Multimodal-Omni', 'Realtime-Omni'])
@@ -188,6 +195,7 @@ export const fetchBailianModels = async (
   let total: number | undefined
   let serverPageSize: number | undefined
   let filteredOut = 0
+  const skipped: SkippedModel[] = []
   let nativeReachable = false
   let pageSize = PAGE_SIZE
   let downgraded = false
@@ -219,6 +227,13 @@ export const fetchBailianModels = async (
         const model = parseNativeItem(item)
         if (!model) {
           filteredOut += 1
+          // 只留前 500 条明细，避免对话框过大
+          if (skipped.length < 500) {
+            skipped.push({
+              id: String(item?.model || item?.id || '').trim() || '(无 id)',
+              capabilities: Array.isArray(item?.capabilities) ? item.capabilities.map(String) : []
+            })
+          }
           continue
         }
         if (!collected.has(model.id)) collected.set(model.id, model)
@@ -237,7 +252,7 @@ export const fetchBailianModels = async (
     }
   }
   if (collected.size > 0) {
-    return { models: [...collected.values()], endpoint: 'native', total, filteredOut }
+    return { models: [...collected.values()], endpoint: 'native', total, filteredOut, skipped }
   }
   if (nativeReachable) {
     statuses.push(`原生端点可访问（供应商共 ${total ?? '未知'} 个模型），但没有可对话模型或响应结构不符`)

@@ -403,6 +403,7 @@
       :total="fetchTotal"
       :filtered-out="fetchFilteredOut"
       :model-count="fetchModelCount"
+      :skipped="fetchSkipped"
       @close="closeFetchDialog"
       @apply="applyFetchResult"
     />
@@ -528,7 +529,7 @@ const {
 // 从供应商 API 拉取模型（百炼原生 capabilities，其它平台回退兼容端点）
 const {
   dialogVisible, fetching, fetchError, fetchEndpoint,
-  fetchTotal, fetchFilteredOut, fetchModelCount,
+  fetchTotal, fetchFilteredOut, fetchModelCount, fetchSkipped,
   added, expired, canFetch,
   openFetchDialog, closeFetchDialog, applyFetchResult,
 } = useFetchModels(selectedPlatform)

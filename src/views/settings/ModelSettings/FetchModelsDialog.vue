@@ -16,6 +16,16 @@
           本次拉取到 <strong>{{ modelCount }}</strong> 个可对话模型<template v-if="total !== undefined"> · 供应商共 {{ total }} 个<template v-if="filteredOut"> · 跳过非对话/无能力标签 {{ filteredOut }} 个</template></template>
         </p>
 
+        <details v-if="skipped && skipped.length" class="fetch-skipped">
+          <summary>查看被跳过的 {{ skipped.length }} 个模型（核对某个模型是「没返回」还是「被过滤」）</summary>
+          <div class="fetch-skipped-list">
+            <div v-for="s in skipped" :key="s.id + s.capabilities.join(',')" class="fetch-skipped-item">
+              <span class="fetch-skipped-id">{{ s.id }}</span>
+              <span class="fetch-skipped-caps">{{ s.capabilities.length ? s.capabilities.join(' / ') : '无能力标签' }}</span>
+            </div>
+          </div>
+        </details>
+
         <div v-if="added.length" class="fetch-section">
           <div class="fetch-section-head">
             <h4>新增模型 ({{ added.length }}) — 勾选以启用</h4>
@@ -62,7 +72,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { FetchedModel } from '../../../services/model/fetchModels'
+import type { FetchedModel, SkippedModel } from '../../../services/model/fetchModels'
 
 const props = defineProps<{
   visible: boolean
@@ -76,6 +86,8 @@ const props = defineProps<{
   filteredOut?: number
   /** 本次拉到的可对话模型数（诊断用） */
   modelCount?: number
+  /** 被跳过的模型明细（诊断用） */
+  skipped?: SkippedModel[]
 }>()
 
 const emit = defineEmits<{
@@ -155,6 +167,21 @@ const apply = () => {
   font-size: 12px; line-height: 1.5;
 }
 .fetch-stat strong { color: #1677ff; font-weight: 600; }
+.fetch-skipped {
+  margin: 0 0 12px; border: 1px solid var(--border-color, #333); border-radius: 8px;
+  font-size: 12px; color: var(--text-secondary, #999);
+}
+.fetch-skipped > summary {
+  cursor: pointer; padding: 8px 12px; list-style: none;
+}
+.fetch-skipped > summary::-webkit-details-marker { display: none; }
+.fetch-skipped > summary::before { content: '▸ '; }
+.fetch-skipped[open] > summary::before { content: '▾ '; }
+.fetch-skipped > summary:hover { color: var(--text-primary, #eaeaea); }
+.fetch-skipped-list { max-height: 220px; overflow-y: auto; padding: 0 12px 10px; }
+.fetch-skipped-item { display: flex; gap: 10px; padding: 3px 0; }
+.fetch-skipped-id { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fetch-skipped-caps { color: var(--text-tertiary, #777); white-space: nowrap; }
 .fetch-section { margin-bottom: 18px; }
 .fetch-section-head {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;

@@ -5,7 +5,8 @@ import { modelConfigManager } from '../../../services/model/config'
 import {
   fetchBailianModels,
   diffFetchedModels,
-  type FetchedModel
+  type FetchedModel,
+  type SkippedModel
 } from '../../../services/model/fetchModels'
 
 export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
@@ -17,6 +18,8 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
   const fetchTotal = ref<number | undefined>(undefined)
   const fetchFilteredOut = ref<number | undefined>(undefined)
   const fetchModelCount = ref(0)
+  /** 诊断：被能力标签跳过的模型明细 */
+  const fetchSkipped = ref<SkippedModel[]>([])
   const added = ref<FetchedModel[]>([])
   const expired = ref<string[]>([])
 
@@ -41,6 +44,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
     fetchTotal.value = undefined
     fetchFilteredOut.value = undefined
     fetchModelCount.value = 0
+    fetchSkipped.value = []
     added.value = []
     expired.value = []
     dialogVisible.value = true
@@ -58,6 +62,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
       fetchTotal.value = result.total
       fetchFilteredOut.value = result.filteredOut
       fetchModelCount.value = result.models.length
+      fetchSkipped.value = result.skipped || []
       if (!result.models.length) {
         const scope = result.total !== undefined ? `（供应商共 ${result.total} 个）` : ''
         fetchError.value = result.error
@@ -113,7 +118,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
 
   return {
     dialogVisible, fetching, fetchError, fetchEndpoint,
-    fetchTotal, fetchFilteredOut, fetchModelCount,
+    fetchTotal, fetchFilteredOut, fetchModelCount, fetchSkipped,
     added, expired, canFetch,
     openFetchDialog, closeFetchDialog, applyFetchResult
   }
