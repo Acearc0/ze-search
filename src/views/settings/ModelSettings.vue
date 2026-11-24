@@ -281,9 +281,11 @@
               <div class="model-info">
                 <div class="model-header">
                   <h5 class="model-name">{{ model.displayName }}</h5>
-                  <!-- 多模态模型同时具备文本与视觉能力，两个标签都要显示 -->
-                  <span class="model-kind-tag model-kind-tag--text">文本</span>
-                  <span v-if="modelHasVision(model)" class="model-kind-tag">视觉</span>
+                  <!-- 多模态模型同时具备文本与视觉能力；标签组统一靠右对齐 -->
+                  <span class="model-tags">
+                    <span class="model-kind-tag model-kind-tag--text">文本</span>
+                    <span v-if="modelHasVision(model)" class="model-kind-tag">视觉</span>
+                  </span>
                 </div>
                 
               </div>

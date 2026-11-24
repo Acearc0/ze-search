@@ -760,10 +760,23 @@ input[type="password"].api-key-input::-ms-reveal {
 }
 
 .model-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
   font-weight: 500;
   color: var(--model-item-name-text);
   margin: 0;
+}
+
+.model-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .model-kind-tag {

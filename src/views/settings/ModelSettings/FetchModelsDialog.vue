@@ -23,7 +23,9 @@
             <label v-for="m in added" :key="m.id" class="fetch-item">
               <input type="checkbox" v-model="checkedAdded" :value="m.id" />
               <span class="fetch-item-id">{{ m.id }}</span>
-              <span class="fetch-type-tag" :class="`fetch-type-${m.category}`">{{ categoryLabel(m.category) }}</span>
+              <!-- 对话类模型都具备文本能力；有能力标签且含视觉理解时追加视觉标签 -->
+              <span class="fetch-type-tag fetch-type-text">文本</span>
+              <span v-if="m.category === 'vision'" class="fetch-type-tag fetch-type-vision">视觉</span>
               <span v-if="m.source === 'guess'" class="fetch-guess-tag" title="供应商未提供能力标签，按名称推断，可能不准">名称推断</span>
             </label>
           </div>
@@ -56,7 +58,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { FetchedModel, ModelCategory } from '../../../services/model/fetchModels'
+import type { FetchedModel } from '../../../services/model/fetchModels'
 
 const props = defineProps<{
   visible: boolean
@@ -93,9 +95,6 @@ const toggleAllExpired = () => {
     ? []
     : [...props.expired]
 }
-
-const categoryLabel = (c: ModelCategory): string =>
-  c === 'vision' ? '视觉' : c === 'summary' ? '总结' : '文本'
 
 const endpointLabel = computed(() =>
   props.endpoint === 'native' ? '供应商能力标签' : props.endpoint === 'compatible' ? '名称推断' : ''
