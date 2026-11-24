@@ -27,10 +27,21 @@ export interface FetchModelsResult {
   /** 实际使用的端点类型 */
   endpoint: 'native' | 'compatible'
   error?: string
+  /** 诊断：供应商 output.total 报告的总数（仅原生端点有） */
+  total?: number
+  /** 诊断：被能力标签过滤掉（生图/TTS/向量等非对话）的条数 */
+  filteredOut?: number
 }
 
 const VISION_CODES = new Set(['VU', 'Multimodal-Omni', 'Realtime-Omni'])
 const CHAT_CODES = new Set(['TG', 'VU', 'Reasoning', 'Multimodal-Omni', 'Realtime-Omni', 'Realtime-Chatting'])
+
+/** 首选每页条数。服务端可能按自身上限截断（文档默认 20），实际值以响应 output.page_size 为准。 */
+const PAGE_SIZE = 100
+/** 超限被服务端拒绝时使用的保守页大小（文档默认值） */
+const MIN_PAGE_SIZE = 20
+/** 翻页硬上限，防止服务端忽略 page_no 时空转（5000 个模型足够） */
+const MAX_MODEL_PAGES = 50
 
 /** 名称启发式，仅在无能力标签时使用 */
 export const guessCategory = (id: string): ModelCategory => {
@@ -42,28 +53,33 @@ export const guessCategory = (id: string): ModelCategory => {
 const normalizeKey = (id: string): string =>
   String(id || '').trim().toLowerCase().replace(/^cmaas-/, '')
 
+/** 单个百炼模型对象 → FetchedModel；非对话模型 / 无能力标签返回 null */
+const parseNativeItem = (item: any): FetchedModel | null => {
+  const id = String(item?.model || item?.id || '').trim()
+  if (!id) return null
+  const caps: string[] = Array.isArray(item?.capabilities)
+    ? item.capabilities.map(String)
+    : []
+  // 没有能力标签就没法判断能否对话，按「无法归类」跳过，由调用方计数上报
+  if (caps.length === 0) return null
+  // 只保留可对话的模型：TG / VU / Reasoning / Omni 等；
+  // IG（文生图）、TTS、ASR、TR（向量/排序）不是答题模型，不拉取
+  if (!caps.some(c => CHAT_CODES.has(c))) return null
+  return {
+    id,
+    category: caps.some(c => VISION_CODES.has(c)) ? 'vision' : 'text',
+    source: 'native',
+    capabilities: caps
+  }
+}
+
 /** 解析百炼原生响应；结构不符返回 null 由调用方回退 */
 export const parseNativeModels = (json: unknown): FetchedModel[] | null => {
   const list = (json as any)?.output?.models
   if (!Array.isArray(list) || list.length === 0) return null
-  const result: FetchedModel[] = []
-  for (const item of list) {
-    const id = String(item?.model || item?.id || '').trim()
-    if (!id) continue
-    const caps: string[] = Array.isArray(item?.capabilities)
-      ? item.capabilities.map(String)
-      : []
-    if (caps.length === 0) continue
-    // 只保留可对话的模型：TG / VU / Reasoning / Omni 等；
-    // IG（文生图）、TTS、ASR、TR（向量/排序）不是答题模型，不拉取
-    if (!caps.some(c => CHAT_CODES.has(c))) continue
-    result.push({
-      id,
-      category: caps.some(c => VISION_CODES.has(c)) ? 'vision' : 'text',
-      source: 'native',
-      capabilities: caps
-    })
-  }
+  const result = list
+    .map(item => parseNativeItem(item))
+    .filter((model): model is FetchedModel => model !== null)
   return result.length ? result : null
 }
 
@@ -166,30 +182,65 @@ export const fetchBailianModels = async (
   const statuses: string[] = []
 
   // ---- 原生端点：翻页拉全 ----
+  // 终止条件必须看 output.total。服务端会把 page_size 截断到自身上限（文档默认 20），
+  // 若按「本页不满 page_size 即末页」判断，第一页就停 → 只能拉到第一页，模型明显偏少。
   const collected = new Map<string, FetchedModel>()
-  for (let pageNo = 1; pageNo <= 10; pageNo++) {
-    const url = `${origin}/api/v1/models?page_no=${pageNo}&page_size=100`
+  let total: number | undefined
+  let serverPageSize: number | undefined
+  let filteredOut = 0
+  let nativeReachable = false
+  let pageSize = PAGE_SIZE
+  let downgraded = false
+  for (let pageNo = 1; pageNo <= MAX_MODEL_PAGES; pageNo++) {
+    const url = `${origin}/api/v1/models?page_no=${pageNo}&page_size=${pageSize}`
     try {
       const resp = await fetchFn(url, { headers, signal })
       if (!resp.ok) {
+        // 部分工作空间对 page_size 超限直接 400，而不是静默截断：降到 20 重试本页
+        if (!downgraded && [400, 413, 422].includes(resp.status)) {
+          downgraded = true
+          pageSize = MIN_PAGE_SIZE
+          pageNo -= 1
+          continue
+        }
         statuses.push(`${new URL(url).pathname} → HTTP ${resp.status}`)
         break
       }
+      nativeReachable = true
       const json = await resp.json()
-      const raw = (json as any)?.output?.models
+      const out = (json as any)?.output
+      const raw = out?.models
+      if (typeof out?.total === 'number' && Number.isFinite(out.total)) total = out.total
+      if (typeof out?.page_size === 'number' && out.page_size > 0) serverPageSize = out.page_size
       if (!Array.isArray(raw) || raw.length === 0) break
-      for (const m of parseNativeModels(json) ?? []) {
-        if (!collected.has(m.id)) collected.set(m.id, m)
+
+      const before = collected.size
+      for (const item of raw) {
+        const model = parseNativeItem(item)
+        if (!model) {
+          filteredOut += 1
+          continue
+        }
+        if (!collected.has(model.id)) collected.set(model.id, model)
       }
-      // 本页不满说明已到末页
-      if (raw.length < 100) break
+
+      const perPage = serverPageSize || raw.length
+      // total 是权威终止条件
+      if (total !== undefined && pageNo * perPage >= total) break
+      // 没有 total 时退回「本页不足一页」
+      if (raw.length < perPage) break
+      // 服务端忽略 page_no（每页返回同一批）时避免无意义空转
+      if (pageNo > 1 && collected.size === before) break
     } catch (e) {
       statuses.push(`${new URL(url).pathname} → ${e instanceof Error ? e.message : String(e)}`)
       break
     }
   }
   if (collected.size > 0) {
-    return { models: [...collected.values()], endpoint: 'native' }
+    return { models: [...collected.values()], endpoint: 'native', total, filteredOut }
+  }
+  if (nativeReachable) {
+    statuses.push(`原生端点可访问（供应商共 ${total ?? '未知'} 个模型），但没有可对话模型或响应结构不符`)
   }
 
   // ---- 回退：OpenAI 兼容端点 ----

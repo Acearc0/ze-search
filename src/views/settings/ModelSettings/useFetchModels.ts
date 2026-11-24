@@ -13,6 +13,10 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
   const fetching = ref(false)
   const fetchError = ref('')
   const fetchEndpoint = ref<'native' | 'compatible' | undefined>(undefined)
+  /** 诊断：供应商报告的总数 / 本次拉到的可对话模型数 / 被能力标签跳过的条数 */
+  const fetchTotal = ref<number | undefined>(undefined)
+  const fetchFilteredOut = ref<number | undefined>(undefined)
+  const fetchModelCount = ref(0)
   const added = ref<FetchedModel[]>([])
   const expired = ref<string[]>([])
 
@@ -34,6 +38,9 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
 
     fetchError.value = ''
     fetchEndpoint.value = undefined
+    fetchTotal.value = undefined
+    fetchFilteredOut.value = undefined
+    fetchModelCount.value = 0
     added.value = []
     expired.value = []
     dialogVisible.value = true
@@ -48,10 +55,14 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
 
       const result = await fetchBailianModels(platform.baseUrl || '', apiKey)
       fetchEndpoint.value = result.endpoint
+      fetchTotal.value = result.total
+      fetchFilteredOut.value = result.filteredOut
+      fetchModelCount.value = result.models.length
       if (!result.models.length) {
+        const scope = result.total !== undefined ? `（供应商共 ${result.total} 个）` : ''
         fetchError.value = result.error
-          ? `拉取失败：${result.error}`
-          : '未拉取到可用模型（已排除生图、向量等非对话模型）。'
+          ? `拉取失败${scope}：${result.error}`
+          : `未拉取到可用模型${scope}（已排除生图、向量等非对话模型）。`
         return
       }
 
@@ -102,6 +113,7 @@ export function useFetchModels(selectedPlatform: Ref<AIPlatform | null>) {
 
   return {
     dialogVisible, fetching, fetchError, fetchEndpoint,
+    fetchTotal, fetchFilteredOut, fetchModelCount,
     added, expired, canFetch,
     openFetchDialog, closeFetchDialog, applyFetchResult
   }

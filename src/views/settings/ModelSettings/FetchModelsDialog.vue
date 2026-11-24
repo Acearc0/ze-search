@@ -12,6 +12,10 @@
       <div class="dialog-body">
         <p v-if="error" class="fetch-error">{{ error }}</p>
 
+        <p v-if="modelCount" class="fetch-stat">
+          本次拉取到 <strong>{{ modelCount }}</strong> 个可对话模型<template v-if="total !== undefined"> · 供应商共 {{ total }} 个<template v-if="filteredOut"> · 跳过非对话/无能力标签 {{ filteredOut }} 个</template></template>
+        </p>
+
         <div v-if="added.length" class="fetch-section">
           <div class="fetch-section-head">
             <h4>新增模型 ({{ added.length }}) — 勾选以启用</h4>
@@ -66,6 +70,12 @@ const props = defineProps<{
   expired: string[]
   endpoint?: 'native' | 'compatible'
   error?: string
+  /** 供应商报告的总模型数（诊断用） */
+  total?: number
+  /** 被能力标签跳过的条数（诊断用） */
+  filteredOut?: number
+  /** 本次拉到的可对话模型数（诊断用） */
+  modelCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -139,6 +149,12 @@ const apply = () => {
   margin: 0 0 12px; padding: 10px 12px; border-radius: 8px;
   background: rgba(255, 77, 79, .1); color: #ff7875; font-size: 12px; line-height: 1.5;
 }
+.fetch-stat {
+  margin: 0 0 12px; padding: 8px 12px; border-radius: 8px;
+  background: rgba(22, 119, 255, .08); color: var(--text-secondary, #999);
+  font-size: 12px; line-height: 1.5;
+}
+.fetch-stat strong { color: #1677ff; font-weight: 600; }
 .fetch-section { margin-bottom: 18px; }
 .fetch-section-head {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
