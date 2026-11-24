@@ -82,23 +82,36 @@ export const parseCompatibleModels = (json: unknown): FetchedModel[] | null => {
 
 /**
  * 生成候选 URL 列表。
- * 各家 Base URL 写法不一（含/不含 /v1、含/不含 /compatible-mode），
- * 逐个尝试比硬拼一条更可靠——之前只拼 '/models' 导致
- * https://xxx/compatible-mode/models（缺 /v1）全部 404。
+ *
+ * 百炼的 Base URL 有多种写法，路径部分各不相同：
+ *   .../compatible-mode          （OpenAI 兼容）
+ *   .../compatible-mode/v1
+ *   .../apps/anthropic           （Anthropic 兼容）
+ * 而模型列表只有两个真实位置：
+ *   原生（带 capabilities）：{origin}/api/v1/models
+ *   兼容（仅 id）：{base}/v1/models 或 {base}/models
+ * 之前按后缀替换推导，遇到 /apps/anthropic 会把路径拼成
+ * /apps/anthropic/api/v1/models（已实测 404）。故改用 URL.origin 取主机根。
  */
 const buildCandidates = (base: string): { native: string[]; compatible: string[] } => {
   const b = String(base || '').trim().replace(/\/+$/, '')
-  // 去掉尾部 /v1 或 /compatible-mode，得到 host 级前缀
-  const stripped = b.replace(/\/compatible-mode\/v1$/i, '').replace(/\/compatible-mode$/i, '')
-  const hostRoot = stripped.replace(/\/v1$/i, '')
+  let origin = ''
+  try {
+    origin = new URL(b).origin
+  } catch {
+    // base 不是合法 URL 时退回字符串截取（去掉已知路径后缀）
+    origin = b.replace(/\/(compatible-mode|apps\/anthropic|apps\/\w+)(\/v1)?$/i, '')
+  }
+
   const hasV1 = /\/v1$/i.test(b)
 
+  // 原生端点固定在主机根下，与 base 的具体路径无关
   const native = [
-    `${hostRoot}/api/v1/models?page_no=1&page_size=100`,
-    `${hostRoot}/api/v1/models`,
+    `${origin}/api/v1/models?page_no=1&page_size=100`,
+    `${origin}/api/v1/models`,
   ]
 
-  // 兼容端点：base 已含 /v1 时直接拼 /models；否则补 /v1/models
+  // 兼容端点相对 base；已含 /v1 时不再重复
   const compatible = hasV1
     ? [`${b}/models`]
     : [`${b}/v1/models`, `${b}/models`]
@@ -155,6 +168,8 @@ export const fetchBailianModels = async (
   const key = String(apiKey || '').trim()
   const headers: Record<string, string> = {
     Authorization: `Bearer ${key}`,
+    // 部分 Anthropic 兼容端点只认 x-api-key；同时带上两种，兼容性更好
+    'x-api-key': key,
     'Content-Type': 'application/json'
   }
 
