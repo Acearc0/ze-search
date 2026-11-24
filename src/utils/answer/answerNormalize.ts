@@ -58,10 +58,42 @@ export const stripLeadingOptionLabel = (
   return trimmed
 }
 
+const JUDGE_TRUE_WORDS = ['正确', '对', '√', '✓', '是', 'true', 't']
+const JUDGE_FALSE_WORDS = ['错误', '错', '×', '✗', '否', 'false', 'f']
+
+/**
+ * 判断题的选项写法不统一：题库常见「对/错」，而模型按规则答「正确/错误」，
+ * 两者字面不同会导致判分失败。这里把答案换成选项里的原文。
+ * 返回 null 表示不需要改写（不是判断题，或选项里没有对应写法）。
+ */
+const mapJudgeAnswerToOptions = (answer: string, options?: string | null): string | null => {
+  const raw = (answer || '').trim()
+  if (!raw || raw.includes('###')) return null
+  const lines = (options || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+  if (lines.length === 0 || lines.length > 4) return null
+
+  const key = raw.toLowerCase()
+  const isTrue = JUDGE_TRUE_WORDS.includes(key)
+  const isFalse = JUDGE_FALSE_WORDS.includes(key)
+  if (!isTrue && !isFalse) return null
+  const pool = isTrue ? JUDGE_TRUE_WORDS : JUDGE_FALSE_WORDS
+
+  for (const line of lines) {
+    const text = line.replace(/^[A-Za-z][\.、．\)]\s*/, '').trim()
+    if (pool.includes(text.toLowerCase())) return text
+  }
+  return null
+}
+
 /**
  * 将模型答案规范为选项正文：
  * - `ABD` / `A` → 映射选项文字（多选用 ###）
  * - `B. 传动角` → `传动角`
+ * - 判断题 `正确` → 选项原文 `对`
  * - 多空 `A###C` 同样处理
  */
 export const normalizeAnswerAgainstOptions = (
@@ -70,6 +102,9 @@ export const normalizeAnswerAgainstOptions = (
 ): string => {
   const raw = (answer || '').trim()
   if (!raw) return ''
+
+  const judge = mapJudgeAnswerToOptions(raw, options)
+  if (judge) return judge
 
   const map = parseOptionLetterMap(options)
   const parts = raw.includes('###') ? raw.split('###') : [raw]
