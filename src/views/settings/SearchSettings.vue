@@ -11,6 +11,7 @@
           @click="selectProvider(provider.id)">
           <span v-if="provider.id === 'exa'" class="provider-icon" v-html="exaIcon" aria-hidden="true"></span>
           <Icon v-else-if="provider.id === 'free'" icon="lucide:globe" class="provider-icon" aria-hidden="true" />
+          <Icon v-else-if="provider.id === 'bailian'" icon="lucide:cloud" class="provider-icon" aria-hidden="true" />
           <img v-else :src="providerIcons[provider.id]" class="provider-icon" alt="" />
           <span class="provider-name">{{ provider.name }}</span>
           <span class="provider-selection"><span v-if="isSelected(provider.id)" class="provider-dot"></span></span>
@@ -21,8 +22,8 @@
             @click="openProviderWebsite($event, provider.website)">
             <Icon icon="lucide:external-link" width="15" height="15" aria-hidden="true" />
           </a>
-          <!-- 免费引擎无需 API Key，不显示密钥按钮 -->
-          <button v-if="provider.id !== 'free'" class="provider-action" type="button"
+          <!-- 免费引擎与百炼内置联网都无需 API Key，不显示密钥按钮 -->
+          <button v-if="provider.id !== 'free' && provider.id !== 'bailian'" class="provider-action" type="button"
             :aria-label="`${getProviderKey(provider) ? '修改' : '填写'} ${provider.name} API 密钥`"
             :title="`${getProviderKey(provider) ? '修改' : '填写'} API 密钥`"
             @click="openDialog(provider, 'key')">
@@ -139,8 +140,8 @@ const menuItems = ref<MenuItem[]>([
 ])
 const openMenu = (event: MouseEvent, provider: SearchProvider) => {
   menuProvider.value = provider
-  // 免费引擎没有 Key 可配，右键菜单只留「开始测试」
-  menuItems.value = provider.id === 'free'
+  // 免费引擎与百炼内置联网都没有 Key 可配，右键菜单只留「开始测试」
+  menuItems.value = provider.id === 'free' || provider.id === 'bailian'
     ? [{ id: 'test', label: '开始测试', action: 'test' }]
     : [{ id: 'key', label: '配置 API Key', action: 'key' }, { id: 'test', label: '开始测试', action: 'test' }]
   Object.assign(menu, { visible: true, x: event.clientX, y: event.clientY })
@@ -224,6 +225,11 @@ const runTest = async () => {
           url: s.url,
           snippet: s.snippet || ''
         }))
+      }
+    } else if (provider.id === 'bailian') {
+      // 联网在百炼服务端完成，客户端没有独立的搜索接口可测
+      if (controller === request) {
+        testMessage.value = '该通道由阿里云百炼在服务端完成联网，无需单独测试，直接答题即可。支持：Qwen（qwen-max / plus / flash、3.5+、4 系列）与 DeepSeek v4 系列；GLM / Kimi 在 Chat 协议下不支持，需改用 Responses API。'
       }
     } else {
       const config = withConfiguredDeepSeekKey({ ...search.value, provider: provider.id, enabled: true })

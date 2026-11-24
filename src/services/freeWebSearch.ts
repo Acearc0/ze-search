@@ -64,8 +64,9 @@ const SEARXNG_INSTANCES = [
   'https://paulgo.io'
 ]
 
-// 回退链顺序（与上游默认优先级一致：bing 最稳定 → ddg → searxng → anysearch → tavily keyless）
-const FALLBACK_ORDER: SearchEngine[] = ['bing', 'ddg', 'ddg-lite', 'searxng', 'anysearch', 'tavily']
+// 回退链顺序：bing 仍作首选（国内直连、快），但 anysearch 实测 1.8s 可用且结果质量好，
+// 提到第二位；ddg / searxng 在国内基本连不上，放最后，避免一次搜索被拖到几十秒。
+const FALLBACK_ORDER: SearchEngine[] = ['bing', 'anysearch', 'ddg', 'ddg-lite', 'searxng', 'tavily']
 
 type FetchLike = (input: string, init?: Record<string, unknown>) => Promise<Response>
 
@@ -157,12 +158,41 @@ function queryOverlapTokens(query: string): string[] {
   return [...tokens]
 }
 
+/**
+ * 查询的核心中文词：取第一个长度 >= 2 的中文片段。
+ * bing 无 cookie 时会降级返回「人工（汉语词汇）」这种词典页，
+ * 用「人工」「中文」这类碎片都能凑出重合，只有整词命中才能判定相关。
+ */
+function queryCoreToken(query: string): string | null {
+  const runs = String(query).match(/[\u4e00-\u9fff]+/g) ?? []
+  const run = runs.find(r => r.length >= 2)
+  if (!run) return null
+  // 超长词组取前 4 字，兼顾「马克思主义基本原理」这类标题不完全一致的场景
+  return run.length > 4 ? run.slice(0, 4) : run
+}
+
 function looksRelevant(query: string, sources: SearchResult[]): boolean {
+  const core = queryCoreToken(query)
+  if (core) {
+    return sources.some(s => {
+      const hay = `${s.title ?? ''} ${s.snippet ?? ''}`.toLowerCase()
+      return hay.includes(core.toLowerCase())
+    })
+  }
+  // 纯英文/数字查询：沿用 token 重合规则（至少命中 2 个词）
   const tokens = queryOverlapTokens(query)
   if (tokens.length === 0) return true
+  const need = Math.min(2, tokens.length)
   return sources.some(s => {
     const hay = `${s.title ?? ''} ${s.snippet ?? ''} ${s.url ?? ''}`.toLowerCase()
-    return tokens.some(t => hay.includes(t.toLowerCase()))
+    let hit = 0
+    for (const t of tokens) {
+      if (hay.includes(t.toLowerCase())) {
+        hit += 1
+        if (hit >= need) return true
+      }
+    }
+    return false
   })
 }
 
@@ -173,13 +203,17 @@ function looksRelevant(query: string, sources: SearchResult[]): boolean {
 async function fetchRaw(url: string, init: Record<string, unknown>, ms: number, signal?: AbortSignal): Promise<Response> {
   const doFetch = await getFetch()
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
-  const onAbort = () => controller.abort()
+  // 带上 reason：否则浏览器只给「signal is aborted without reason」，排查时看不出是超时
+  const timer = setTimeout(() => controller.abort(new DOMException(`搜索超时（${Math.round(ms / 1000)} 秒）`, 'TimeoutError')), ms)
+  const onAbort = () => controller.abort(signal?.reason)
   signal?.addEventListener('abort', onAbort)
   try {
     return await doFetch(url, { ...init, signal: controller.signal })
   } catch (error: any) {
     if (signal?.aborted) throw error
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      throw new Error(`请求超时（${Math.round(ms / 1000)} 秒）`)
+    }
     throw new Error(`connection error: ${error?.message ?? String(error)}`)
   } finally {
     clearTimeout(timer)
@@ -457,6 +491,9 @@ export function resetEngineCooldowns(): void {
   engineCooldownUntil.clear()
 }
 
+/** 单次搜索的总时长预算：回退链再长也不能让用户等半分钟（anysearch 实测 1.8s 可用） */
+const SEARCH_BUDGET_MS = 15_000
+
 /**
  * 统一搜索入口：首选引擎 → 其余免费引擎逐个回退。
  * 全部失败时抛出聚合错误；调用方（工具执行器）负责把失败转为给模型的提示文本。
@@ -474,11 +511,16 @@ export async function webSearch(
   const order = [preferred, ...FALLBACK_ORDER.filter(e => e !== preferred)]
   const max = maxResultsOf(cfg)
   const baseTimeoutSeconds = Math.max(1, timeoutMs(cfg) / 1000)
+  const deadline = Date.now() + SEARCH_BUDGET_MS
   const errors: string[] = []
   const skipped: string[] = []
 
   for (let i = 0; i < order.length; i++) {
     const engine = order[i]
+    if (Date.now() >= deadline) {
+      errors.push('搜索总时长超限，停止继续回退')
+      break
+    }
     // 冷却中的引擎直接跳过：国内 ddg / searxng 反复超时，每次都要白等十几秒
     if (!options?.ignoreCooldown && isEngineCoolingDown(engine)) {
       skipped.push(engine)

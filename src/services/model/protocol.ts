@@ -638,6 +638,8 @@ ${injectTemplateHelpers(modelId, thinking)}
   if (typeof config.topP === 'number') payload.top_p = config.topP;
   if (typeof config.maxTokens === 'number') payload.max_tokens = config.maxTokens;
   applyOpenAIThinkingPayload(payload, 'chat');
+  // 百炼内置联网（provider='bailian'）：服务端直接联网，无需我们再注入搜索工具
+  if (config.enableSearch === true) payload.enable_search = true;
 
   const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/chat/completions', {
     method: 'POST',

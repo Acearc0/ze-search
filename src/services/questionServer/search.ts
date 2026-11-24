@@ -30,8 +30,9 @@ export const runSearchForRequest = async (
   const config = settingsApi.settings.search
   if (!config?.enabled) return null
   // provider='free' 走模型 function call 按需搜索（见 freeWebSearch.ts / invoke.ts），
-  // 不做答题前的预搜，避免同一次答题搜两遍
-  if (config.provider === 'free') return null
+  // provider='bailian' 由百炼服务端联网（请求里带 enable_search），两者都不做答题前的预搜，
+  // 避免同一次答题搜两遍
+  if (config.provider === 'free' || config.provider === 'bailian') return null
   const query = (rawQuery || '').replace(/https?:\/\/\S+/gi, ' ').replace(/\s+/g, ' ').trim()
   if (!query) return null
   if (isRequestCancelled(requestId)) throw createCancelledRequestError()

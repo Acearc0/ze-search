@@ -1,6 +1,9 @@
 export const SEARCH_PROVIDERS = [
   // 免费引擎：无需 API Key，由模型通过 function call 按需触发（见 freeWebSearch.ts）
   { id: 'free', name: '免费引擎（免 Key）', key: 'apiKey', website: '', toolName: 'web_search' },
+  // 百炼内置联网：不注入工具、不做预搜，直接给模型请求加 enable_search，由服务端完成联网。
+  // 不需要额外 Key（复用模型平台的 Key），但只有 Qwen 系列支持该参数。
+  { id: 'bailian', name: '阿里云百炼（内置联网）', key: 'apiKey', website: 'https://help.aliyun.com/zh/model-studio/web-search', toolName: 'enable_search' },
   { id: 'exa', name: 'Exa', key: 'apiKey', website: 'https://exa.ai/', toolName: 'web_search_exa' },
   { id: 'deepseek', name: 'DeepSeek', key: 'deepseekApiKey', website: 'https://api-docs.deepseek.com/', toolName: 'deepseek_search' },
   { id: 'tavily', name: 'Tavily', key: 'tavilyApiKey', website: 'https://www.tavily.com/', toolName: 'tavily_search' },

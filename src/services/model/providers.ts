@@ -5,7 +5,7 @@ import { resolveModelApiProtocol } from './configTypes'
 import type { AIModel, AIPlatform } from './configTypes'
 export type ProviderMessage = { role: string; content?: unknown; tool_calls?: unknown[]; tool_call_id?: string; name?: string; [key: string]: unknown }
 export type ProviderRequest = { messages: ProviderMessage[]; tools?: unknown[]; stream?: boolean; model?: string }
-export type ProviderConfig = { baseUrl: string; apiKey: string; modelId?: string; model?: string; customHeaders?: Record<string, string>; temperature?: number; topP?: number; maxTokens?: number }
+export type ProviderConfig = { baseUrl: string; apiKey: string; modelId?: string; model?: string; customHeaders?: Record<string, string>; temperature?: number; topP?: number; maxTokens?: number; enableSearch?: boolean }
 export type ProviderChunk = { content?: string; reasoning_content?: string; tool_calls?: unknown[]; thinking_blocks?: unknown[]; usage?: Record<string, unknown> }
 export type ProviderFetch = (url: string, init: RequestInit) => Promise<Response>
 export type ProviderAdapter = (input: ProviderRequest, config: ProviderConfig, fetch: ProviderFetch, abortSignal: AbortSignal) => Promise<ProviderChunk | AsyncIterable<ProviderChunk>>
@@ -562,6 +562,8 @@ const {
   if (typeof config.topP === 'number') payload.top_p = config.topP;
   if (typeof config.maxTokens === 'number') payload.max_tokens = config.maxTokens;
   applyOpenAIThinkingPayload(payload, 'chat');
+  // 百炼内置联网（provider='bailian'）：服务端直接联网，无需我们再注入搜索工具
+  if (config.enableSearch === true) payload.enable_search = true;
 
   const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/chat/completions', {
     method: 'POST',

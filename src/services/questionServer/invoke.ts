@@ -54,8 +54,29 @@ export const getModelRetryCount = () => {
   return Math.min(10, Math.floor(n))
 }
 
-export const shouldSkipModelRetry = (_error: unknown, requestId: string) => {
-  return isRequestCancelled(requestId)
+/**
+ * 百炼 Chat Completions 的 enable_search 白名单（官方文档「支持的模型」）：
+ * - 千问：qwen-max / qwen-plus / qwen-flash 及 2025-07 后快照、qwen3.5~3.8、qwen4 系列
+ * - DeepSeek：deepseek-v4-pro / deepseek-v4-flash-0731 / deepseek-v4.1-flash-1017
+ * - GLM 5.2 与 Kimi（k3 / k3.1-pro）只在 Responses API 支持，Chat 协议下传了无效，
+ *   所以这里不传；Omni 系列需要 multimodal 端点 + agent 策略，同样排除。
+ */
+const BAILIAN_CHAT_SEARCH_RE = /^(?:qwen-(?:max|plus|flash)|qwen(?:3\.[5-9]|4)(?!.*omni)|deepseek-v4)/i
+
+/**
+ * provider='bailian'：不注入工具、不做预搜，直接在模型请求里带 enable_search，
+ * 由百炼服务端完成联网（国内直连，不依赖 bing/ddg 这些在墙外或返回降级结果的引擎）。
+ */
+const resolveBailianSearchEnabled = (model: AIModel): boolean => {
+  const raw = normalizeSearchSettings(settings.search)
+  if (!raw.enabled || raw.provider !== 'bailian') return false
+  const id = String(model?.modelId || model?.id || '').toLowerCase()
+  return BAILIAN_CHAT_SEARCH_RE.test(id)
+}
+
+export const shouldSkipModelRetry = (error: unknown, requestId: string) => {
+  // 超时/取消是确定性失败，重试只会让用户多等一轮，并且可把已经超时的请求再拖 40 秒
+  return isRequestCancelled(requestId) || isAbortLikeError(error)
 }
 
 export const withModelRetry = async <T>(
@@ -222,7 +243,9 @@ export const callModelWithStreaming = async (
     maxTokens: resolveModelOutputLimit(model),
     baseUrl: platform.baseUrl,
     model: runtimeModelId,
-    modelId: runtimeModelId
+    modelId: runtimeModelId,
+    // 百炼内置联网：由 provider 层在 payload 里加 enable_search
+    enableSearch: resolveBailianSearchEnabled(model)
   }
 
   // 读取超时配置（秒转毫秒）
@@ -231,13 +254,25 @@ export const callModelWithStreaming = async (
   // AbortController 用于超时中断 fetch
   const abortController = new AbortController()
   registerAbortController(requestId, abortController)
-  const timeoutHandle = setTimeout(() => {
+  // 工具调用（联网搜索）会额外耗时，模型那头不应该继续吃同一份超时预算，
+  // 所以每次执行工具前重置计时器。
+  let timeoutHandle = setTimeout(() => {
     if (!isRequestCancelled(requestId)) {
       abortController.abort(new DOMException(`模型响应超时（${Math.round(timeoutMs / 1000)} 秒）`, 'TimeoutError'))
     } else {
       abortController.abort()
     }
   }, timeoutMs)
+  const armTimeout = () => {
+    clearTimeout(timeoutHandle)
+    timeoutHandle = setTimeout(() => {
+      if (!isRequestCancelled(requestId)) {
+        abortController.abort(new DOMException(`模型响应超时（${Math.round(timeoutMs / 1000)} 秒）`, 'TimeoutError'))
+      } else {
+        abortController.abort()
+      }
+    }, timeoutMs)
+  }
 
   const rawTauriFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     try {
@@ -349,6 +384,9 @@ export const callModelWithStreaming = async (
                   // 仅通过进度事件告知后端，避免污染判分文本
                   void sendModelProgressToBackend(requestId, `正在调用工具: ${tc.function.name}`)
 
+                  // 搜索可能耗时十几秒，重置模型侧超时，避免工具还没回来就被判超时
+                  armTimeout()
+
                   let toolResult = ''
                   if (freeSearchConfig && tc.function?.name === 'web_search') {
                     toolResult = await executeWebSearchToolCall(
@@ -364,12 +402,18 @@ export const callModelWithStreaming = async (
                   // fullResponse 是最终答案，混入搜索原文会污染判分文本与 UI 展示
                   testInput.messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: toolResult })
                 } catch (e: any) {
-                  const errStr = `Error: ${e.message || String(e)}`
-                  fullResponse += `[工具执行失败: ${errStr}]\n\n`
-                  if (onChunk) onChunk(fullResponse)
-                  else updateStreamingResponse(requestId, fullResponse)
-
-                  testInput.messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: errStr })
+                  // 只在整个请求被取消/超时时向上抛；搜索自身超时不算请求失败，
+                  // 要走下面的分支交给模型凭自身知识继续作答
+                  if (isRequestCancelled(requestId) || abortController.signal.aborted) {
+                    throw e
+                  }
+                  // 真正的工具失败也只回传给模型，绝不拼进 fullResponse（那是判分文本）
+                  testInput.messages.push({
+                    role: 'tool',
+                    tool_call_id: tc.id,
+                    name: tc.function.name,
+                    content: `Error: ${e.message || String(e)}`
+                  })
                 }
               }
               
@@ -466,7 +510,8 @@ export const callModel = async (model: AIModel, query: string) => {
     maxTokens: resolveModelOutputLimit(model),
     baseUrl: platform.baseUrl,
     model: runtimeModelId,
-    modelId: runtimeModelId
+    modelId: runtimeModelId,
+    enableSearch: resolveBailianSearchEnabled(model)
   }
 
   const tauriFetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
