@@ -1017,10 +1017,16 @@ fn score_question_row(
     };
 
     let is_exact_title_match = is_exact_match_score(title_score);
-    if !is_exact_title_match
-        && (require_option_match || has_query_options)
-        && option_similarity.is_none()
-    {
+    // 通用题干（「下列说法正确的是」这类）本身不含主题词，题库里往往存在多道
+    // 同题干、不同选项的题。原来题干精确匹配就直接命中，会捞出另一道题的答案
+    // （表现为「答案不在选项里」）。这里要求选项也必须对得上。
+    if require_option_match {
+        const MIN_GENERIC_OPTION_SIMILARITY: f64 = 0.5;
+        match option_similarity {
+            Some(similarity) if similarity >= MIN_GENERIC_OPTION_SIMILARITY => {}
+            _ => return None,
+        }
+    } else if !is_exact_title_match && has_query_options && option_similarity.is_none() {
         return None;
     }
 
