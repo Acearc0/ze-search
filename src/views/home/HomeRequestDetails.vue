@@ -404,7 +404,8 @@ const processSteps = computed(() => {
     : localSearch === 'failed' ? 'failed'
     : localSearch === 'hit' || similarLocalQuestions.value.length > 0 ? 'completed'
     : localSearch === 'miss' ? 'no-result'
-    : status == null && !localSearch ? 'running' : 'idle'
+    // 请求已结束却没有任何本地检索记录 = 压根没走这一步，按 skipped 过滤掉
+    : status == null ? 'running' : 'skipped'
   const web: StepState = searchTraces.some(trace => trace.status === 'searching') ? 'running'
     : searchTraces.some(trace => trace.status === 'success' && trace.results.length > 0) ? 'completed'
     : searchTraces.some(trace => trace.status === 'success') ? 'no-result'
@@ -416,7 +417,7 @@ const processSteps = computed(() => {
   const summary = modelStepState(summaryModels.value, unusedStep)
   const returnState: StepState = status == null ? 'idle' : status >= 400 ? 'failed' : 'completed'
 
-  return [
+  const steps = [
     { id: 'receive', label: '接收', state: 'completed' },
     { id: 'local', label: '本地搜索', state: local },
     { id: 'web', label: '联网搜索', state: web },
@@ -424,6 +425,9 @@ const processSteps = computed(() => {
     { id: 'summary', label: '总结', state: summary },
     { id: 'return', label: '返回', state: returnState },
   ] as const
+
+  // 只渲染真正发生过的步骤：没有联网、没配总结模型时不再占位
+  return steps.filter(step => step.state !== 'skipped')
 })
 
 type ProcessStepId = typeof processSteps.value[number]['id']
@@ -438,6 +442,14 @@ const exchangeHeaders = computed(() => {
 watch(() => props.log.id, () => {
   activeModelTab.value = ''
   activeTab.value = 'receive'
+})
+
+// 步骤被过滤掉（比如请求结束后才发现没走联网/总结）时，把选中项拉回第一个可用步骤，
+// 避免停留在已经不存在的标签上显示空面板
+watch(processSteps, (steps) => {
+  if (!steps.some(step => step.id === activeTab.value)) {
+    activeTab.value = steps[0]?.id ?? 'receive'
+  }
 })
 
 const bindScroll = async () => {
