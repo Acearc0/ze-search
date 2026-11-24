@@ -1,4 +1,5 @@
 import type { AIModel } from '../model/config'
+import { resolveModelApiProtocol } from '../model/config'
 import { resolveExecutableModelJsCode, resolveRuntimeModelId } from '../model/protocol'
 import { resolveModelOutputLimit } from '../model/contextBudget'
 import { createBuiltinProvider } from '../model/providers'
@@ -55,23 +56,46 @@ export const getModelRetryCount = () => {
 }
 
 /**
- * 百炼 Chat Completions 的 enable_search 白名单（官方文档「支持的模型」）：
- * - 千问：qwen-max / qwen-plus / qwen-flash 及 2025-07 后快照、qwen3.5~3.8、qwen4 系列
- * - DeepSeek：deepseek-v4-pro / deepseek-v4-flash-0731 / deepseek-v4.1-flash-1017
- * - GLM 5.2 与 Kimi（k3 / k3.1-pro）只在 Responses API 支持，Chat 协议下传了无效，
- *   所以这里不传；Omni 系列需要 multimodal 端点 + agent 策略，同样排除。
+ * 百炼联网的模型白名单，分协议（官方文档「支持的模型」）：
+ * - Chat Completions（enable_search）：千问 qwen-max/plus/flash、qwen3.5~3.8、qwen4、
+ *   DeepSeek v4 系列。GLM 5.2 与 Kimi k3/k3.1-pro 在该协议下不支持。
+ * - Responses（web_search 工具）：上述全部，外加 glm-5.2、kimi-k3、kimi-k3.1-pro，
+ *   以及 Omni 系列（其内置工具只支持 web_search）。
  */
 const BAILIAN_CHAT_SEARCH_RE = /^(?:qwen-(?:max|plus|flash)|qwen(?:3\.[5-9]|4)(?!.*omni)|deepseek-v4)/i
+const BAILIAN_RESPONSES_SEARCH_RE = /^(?:qwen-(?:max|plus|flash)|qwen(?:3\.[5-9]|4)|deepseek-v4|glm-5\.2|kimi-k3)/i
 
 /**
- * provider='bailian'：不注入工具、不做预搜，直接在模型请求里带 enable_search，
+ * provider='bailian'：不注入工具、不做预搜，直接在模型请求里带 enable_search / web_search，
  * 由百炼服务端完成联网（国内直连，不依赖 bing/ddg 这些在墙外或返回降级结果的引擎）。
  */
-const resolveBailianSearchEnabled = (model: AIModel): boolean => {
+const resolveBailianSearchEnabled = (model: AIModel, protocol: string): boolean => {
   const raw = normalizeSearchSettings(settings.search)
   if (!raw.enabled || raw.provider !== 'bailian') return false
   const id = String(model?.modelId || model?.id || '').toLowerCase()
-  return BAILIAN_CHAT_SEARCH_RE.test(id)
+  const re = protocol === 'openai-response' ? BAILIAN_RESPONSES_SEARCH_RE : BAILIAN_CHAT_SEARCH_RE
+  return re.test(id)
+}
+
+/**
+ * GLM 5.2 / Kimi k3 这类模型在 Chat 协议下不认 enable_search，只在 Responses 协议下能挂
+ * web_search 工具。选百炼联网时自动把本次请求切到 Responses，省得用户手动改协议；
+ * 显式配置成 responses 的模型本来就满足，不会重复处理。
+ */
+const resolveEffectiveSearchProtocol = (
+  model: AIModel,
+  platform: { apiProtocol?: string } | undefined
+): { protocol: string; enableSearch: boolean; autoSwitched: boolean } => {
+  const base = resolveModelApiProtocol(model, platform as any)
+  const chatSupported = resolveBailianSearchEnabled(model, 'openai-chat')
+  const responseSupported = resolveBailianSearchEnabled(model, 'openai-response')
+  const autoSwitched = base === 'openai-chat' && !chatSupported && responseSupported
+  const protocol = autoSwitched ? 'openai-response' : base
+  return {
+    protocol,
+    enableSearch: resolveBailianSearchEnabled(model, protocol),
+    autoSwitched
+  }
 }
 
 export const shouldSkipModelRetry = (error: unknown, requestId: string) => {
@@ -214,6 +238,14 @@ export const callModelWithStreaming = async (
 
   // 构建测试输入数据（普通答题注入典型例题多轮对话）
   const chatMessages = buildAnswerChatMessages(query)
+  // GLM 5.2 / Kimi k3 在 Chat 协议下不认 enable_search，选了百炼联网时自动切 Responses
+  const searchPlan = resolveEffectiveSearchProtocol(model, platform)
+  const adapterModel: AIModel = searchPlan.autoSwitched
+    ? { ...model, apiProtocol: 'openai-response' }
+    : model
+  const adapterPlatform = searchPlan.autoSwitched
+    ? { ...platform, apiProtocol: 'openai-response' as const }
+    : platform
   if (searchContext) {
     const lastUserMessage = [...chatMessages].reverse().find(message => message.role === 'user')
     if (lastUserMessage) lastUserMessage.content = `${searchContext}\n\n${lastUserMessage.content}`
@@ -244,8 +276,8 @@ export const callModelWithStreaming = async (
     baseUrl: platform.baseUrl,
     model: runtimeModelId,
     modelId: runtimeModelId,
-    // 百炼内置联网：由 provider 层在 payload 里加 enable_search
-    enableSearch: resolveBailianSearchEnabled(model)
+    // 百炼内置联网：由 provider 层在 payload 里加 enable_search / web_search
+    enableSearch: searchPlan.enableSearch
   }
 
   // 读取超时配置（秒转毫秒）
@@ -293,7 +325,7 @@ export const callModelWithStreaming = async (
   // 执行JavaScript配置代码
   if (executableCode) {
     // 创建一个安全的执行环境
-    let processModel: any = createBuiltinProvider(model, platform)
+    let processModel: any = createBuiltinProvider(adapterModel, adapterPlatform)
 
     if (!processModel && (executableCode.startsWith('async function') || executableCode.startsWith('function'))) {
       const safeEval = new Function('input', 'config', 'fetch', 'abortSignal', `
@@ -489,6 +521,13 @@ export const callModel = async (model: AIModel, query: string) => {
   if (!platform) {
     throw new Error('未找到模型所属平台')
   }
+  const searchPlan = resolveEffectiveSearchProtocol(model, platform)
+  const adapterModel: AIModel = searchPlan.autoSwitched
+    ? { ...model, apiProtocol: 'openai-response' }
+    : model
+  const adapterPlatform = searchPlan.autoSwitched
+    ? { ...platform, apiProtocol: 'openai-response' as const }
+    : platform
 
   // 构建测试输入数据
   const testInput = {
@@ -511,7 +550,7 @@ export const callModel = async (model: AIModel, query: string) => {
     baseUrl: platform.baseUrl,
     model: runtimeModelId,
     modelId: runtimeModelId,
-    enableSearch: resolveBailianSearchEnabled(model)
+    enableSearch: searchPlan.enableSearch
   }
 
   const tauriFetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
@@ -523,7 +562,7 @@ export const callModel = async (model: AIModel, query: string) => {
   // 执行JavaScript配置代码
   if (executableCode) {
     // 创建一个安全的执行环境
-    let processModel: any = createBuiltinProvider(model, platform)
+    let processModel: any = createBuiltinProvider(adapterModel, adapterPlatform)
 
     if (!processModel && (executableCode.startsWith('async function') || executableCode.startsWith('function'))) {
       // 如果是完整的函数声明，使用eval在安全环境中执行

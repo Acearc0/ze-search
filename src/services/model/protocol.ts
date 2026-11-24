@@ -677,6 +677,12 @@ ${injectTemplateHelpers(modelId, thinking)}
   if (input.tools && input.tools.length) {
     payload.tools = input.tools.map(mapResponseTool).filter(Boolean);
   }
+  // 百炼内置联网：Responses 协议挂内置 web_search 工具（GLM 5.2 / Kimi k3 只在这条路支持）
+  if (config.enableSearch === true) {
+    const tools = Array.isArray(payload.tools) ? payload.tools : [];
+    tools.push({ type: 'web_search' });
+    payload.tools = tools;
+  }
   applyOpenAIThinkingPayload(payload, 'responses');
 
   const response = await fetch(normalizeBaseUrl(config.baseUrl) + '/responses', {
