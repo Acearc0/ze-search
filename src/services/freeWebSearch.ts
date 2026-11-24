@@ -431,33 +431,79 @@ const ENGINE_IMPL: Record<SearchEngine, (q: string, max: number, cfg: WebSearchS
   tavily: searchTavily
 }
 
+/** 国内基本连不上的引擎：给更短的超时，别把整条回退链拖成几十秒 */
+const OFFSHORE_ENGINES = new Set<SearchEngine>(['ddg', 'ddg-lite', 'searxng', 'tavily'])
+const OFFSHORE_TIMEOUT_MS = 6000
+
+/** 引擎失败后的冷却时间：境外引擎 10 分钟不再尝试，避免每次答题都白等一次超时；
+ *  bing 是主力，冷却短一些，网络抖动恢复后能尽快回到主链。 */
+const ENGINE_COOLDOWN_MS = 10 * 60 * 1000
+const BING_COOLDOWN_MS = 60 * 1000
+const engineCooldownUntil = new Map<SearchEngine, number>()
+
+const isEngineCoolingDown = (engine: SearchEngine) => {
+  const until = engineCooldownUntil.get(engine)
+  return typeof until === 'number' && Date.now() < until
+}
+const markEngineDown = (engine: SearchEngine) => {
+  engineCooldownUntil.set(engine, Date.now() + (engine === 'bing' ? BING_COOLDOWN_MS : ENGINE_COOLDOWN_MS))
+}
+const markEngineUp = (engine: SearchEngine) => {
+  engineCooldownUntil.delete(engine)
+}
+
+/** 单测/手动测试连接用：清空冷却状态 */
+export function resetEngineCooldowns(): void {
+  engineCooldownUntil.clear()
+}
+
 /**
  * 统一搜索入口：首选引擎 → 其余免费引擎逐个回退。
  * 全部失败时抛出聚合错误；调用方（工具执行器）负责把失败转为给模型的提示文本。
  */
-export async function webSearch(query: string, cfg: WebSearchSettings, signal?: AbortSignal): Promise<SearchResponse> {
+export async function webSearch(
+  query: string,
+  cfg: WebSearchSettings,
+  signal?: AbortSignal,
+  options?: { ignoreCooldown?: boolean }
+): Promise<SearchResponse> {
   const q = String(query ?? '').trim()
   if (!q) throw new Error('empty query')
 
   const preferred: SearchEngine = ENGINE_IMPL[cfg.engine] ? cfg.engine : 'bing'
   const order = [preferred, ...FALLBACK_ORDER.filter(e => e !== preferred)]
   const max = maxResultsOf(cfg)
+  const baseTimeoutSeconds = Math.max(1, timeoutMs(cfg) / 1000)
   const errors: string[] = []
+  const skipped: string[] = []
 
   for (let i = 0; i < order.length; i++) {
     const engine = order[i]
+    // 冷却中的引擎直接跳过：国内 ddg / searxng 反复超时，每次都要白等十几秒
+    if (!options?.ignoreCooldown && isEngineCoolingDown(engine)) {
+      skipped.push(engine)
+      errors.push(`${engine}: 跳过（近期连接失败）`)
+      continue
+    }
+    const engineCfg = OFFSHORE_ENGINES.has(engine)
+      ? { ...cfg, timeoutSeconds: Math.min(baseTimeoutSeconds, OFFSHORE_TIMEOUT_MS / 1000) }
+      : cfg
     try {
-      const sources = await ENGINE_IMPL[engine](q, max, cfg, signal)
+      const sources = await ENGINE_IMPL[engine](q, max, engineCfg, signal)
       if (sources.length > 0) {
+        markEngineUp(engine)
+        const failed = order.slice(0, i).filter(name => !skipped.includes(name))
         return {
           sources,
           engine,
-          ...(i > 0 ? { fallbackNote: `${order.slice(0, i).join(', ')} failed, using ${engine}.` } : {})
+          ...(failed.length > 0 ? { fallbackNote: `${failed.join(', ')} failed, using ${engine}.` } : {})
         }
       }
       errors.push(`${engine}: 0 results`)
     } catch (error: any) {
       if (signal?.aborted) throw error
+      // 网络层/HTTP 失败才冷却；单纯 0 结果可能只是这个查询没命中
+      markEngineDown(engine)
       errors.push(`${engine}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }

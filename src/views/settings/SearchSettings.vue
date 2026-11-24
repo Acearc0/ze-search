@@ -215,7 +215,7 @@ const runTest = async () => {
         timeoutSeconds: 15, searxngInstances: ''
       }
       const started = Date.now()
-      const outcome = await freeWebSearch('人工智能 最新进展 中文', freeCfg, request.signal)
+      const outcome = await freeWebSearch('人工智能 最新进展 中文', freeCfg, request.signal, { ignoreCooldown: true })
       if (controller === request) {
         testMessage.value = `连接成功，耗时 ${Date.now() - started}ms，返回 ${outcome.sources.length} 条结果（引擎: ${outcome.engine}）`
         // 官方 SearchResultItem 的 title/snippet 为必填，免费引擎可能缺省，这里补齐
