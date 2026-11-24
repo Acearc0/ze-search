@@ -141,15 +141,17 @@ pub fn attach_main_window_state(window: &WebviewWindow) {
     static DIRTY: AtomicBool = AtomicBool::new(false);
 
     let app = window.app_handle().clone();
+    // 事件闭包会 move 走一份 handle，后面给写盘线程还要用，所以先克隆一份
+    let event_app = app.clone();
     let win = window.clone();
     window.on_window_event(move |event| match event {
         tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
             DIRTY.store(true, Ordering::Relaxed);
         }
         tauri::WindowEvent::CloseRequested { .. } => {
-            let previous = load_window_state(&app);
+            let previous = load_window_state(&event_app);
             if let Some(state) = capture_window_state(&win, previous.as_ref()) {
-                write_window_state(&app, &state);
+                write_window_state(&event_app, &state);
             }
         }
         _ => {}
