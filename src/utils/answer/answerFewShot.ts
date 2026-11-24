@@ -7,7 +7,8 @@ type FewShotPair = { user: string; assistant: string }
 const SYSTEM_RULES = `你是专业答题助手。最终只输出一行 JSON：{"answer":"答案正文"}。
 选择题 answer 必须是选项正文（与选项原文去掉 A./B. 后一致），禁止写 A/B/C/D，禁止写「B. 传动角」这种带字母前缀的形式。
 判断题 answer 只能是「正确」或「错误」。
-多选题多个答案用 ### 连接；填空题多空也用 ### 连接。`
+多选题多个答案用 ### 连接；填空题多空也用 ### 连接。
+没有标注题型时：只要题干或选项显示可能不止一个正确答案（如「包括」「有哪些」「下列…的有」「多选」），必须检查全部选项，把正确的都用 ### 连起来，不要只给一个。`
 
 const SINGLE_SHOTS: FewShotPair[] = [
   {
@@ -85,12 +86,16 @@ const COMPLETION_SHOTS: FewShotPair[] = [
 
 const GENERAL_SHOTS: FewShotPair[] = [
   SINGLE_SHOTS[0],
+  // 题型未知时也要给一个多选示范，否则模型只见过单选/判断的例子，天然倾向只答一个
+  MULTIPLE_SHOTS[0],
   JUDGEMENT_SHOTS[0],
 ]
 
 export const detectAnswerFewShotKind = (query: string): AnswerFewShotKind => {
   const q = query || ''
   if (/题目类型：\s*多选/.test(q) || /multiple/i.test(q)) return 'multiple'
+  // 客户端没传题型字段时，用题干里的明确复数信号兜底（单选题基本不会写这些词）
+  if (/多选|多项选择|选出所有|以下哪些|全部正确/.test(q)) return 'multiple'
   if (/题目类型：\s*判断/.test(q) || /judg(?:e)?ment/i.test(q)) return 'judgement'
   if (/题目类型：\s*填空/.test(q) || /completion/i.test(q)) return 'completion'
   if (/题目类型：\s*单选/.test(q) || /single/i.test(q)) return 'single'

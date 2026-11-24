@@ -37,7 +37,8 @@ pub(super) fn build_model_query_prompt(
     q.push_str("2. 最后一行输出**唯一**一个 JSON 对象，不要用 markdown 代码块包裹，JSON 前后不要附加说明。\n");
     q.push_str("3. JSON 格式严格为：{\"answer\": \"最终答案\"}\n");
     q.push_str("4. answer 只写答案正文本身：选择题必须与【选项】中去掉「A.」「B.」后的文字完全一致；判断题只写「正确」或「错误」；填空题只写填空内容。\n");
-    q.push_str("5. 严禁把选项字母写进 answer：不要写 A/B/C/D，不要写「B. 传动角」「D. meeting」，应直接写「传动角」「meeting」。不要把分析过程写进 answer。\n\n");
+    q.push_str("5. 严禁把选项字母写进 answer：不要写 A/B/C/D，不要写「B. 传动角」「D. meeting」，应直接写「传动角」「meeting」。不要把分析过程写进 answer。\n");
+    q.push_str("6. 若题目存在多个正确选项（多选题），answer 必须用「###」连接全部正确选项，例如 {\"answer\":\"选项一###选项二\"}；只写一个选项会被判为漏选。题干出现「包括」「有哪些」「下列…的有」等措辞时要特别检查是否漏选。\n\n");
 
     if let Some(raw_type) = query_type.map(str::trim).filter(|value| !value.is_empty()) {
         if let Some(kind) = detect_question_kind(raw_type) {
