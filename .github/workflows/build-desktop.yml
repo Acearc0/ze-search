@@ -1,15 +1,16 @@
 name: Build desktop installers
 
+# 精简版：只出 Windows 安装包。
+# 相比官方配置移除：
+#   - macOS / Linux job（用户不需要）
+#   - native regression / 实机安装 / 桌面功能回归（官方发布验证，与出包无关，最耗时）
+#   - 回归证据 artifact 上传
+# 保留：依赖安装 → Tauri 构建 → 上传安装包。
+
 on:
   workflow_call:
-    inputs:
-      macos:
-        type: boolean
-        default: false
   workflow_dispatch:
   push:
-    # v23-custom-search：定制分支（免费引擎搜索 + 供应商模型拉取），
-    # 需要能直接出安装包验证，故不加 paths 白名单限制。
     branches: [dev-improvements, v23-custom-search]
 
 permissions:
@@ -19,64 +20,34 @@ jobs:
   windows:
     name: windows-x64
     runs-on: windows-2025
-    timeout-minutes: 90
+    # 精简后正常 10-15 分钟，留足余量
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          # 失败也缓存，避免一次编译错误后下次全量重编
+          cache-on-failure: true
+
       - run: npm ci
 
       - name: Configure installer build
         run: |
-          node -e 'require("node:fs").writeFileSync(".tauri-ci.json", JSON.stringify({ bundle: { createUpdaterArtifacts: false } }))'
+          node -e 'require("node:fs").writeFileSync(".tauri-ci.json", JSON.stringify({ bundle: { createUpdaterArtifacts: false, windows: { nsis: { compression: "zlib" } } } }))'
 
       - name: Build Windows NSIS installer
         run: node scripts/tauri-cli.mjs build --ci --target x86_64-pc-windows-msvc --bundles nsis --config .tauri-ci.json -- --locked
-
-      - name: Verify native CLI
-        run: .\src-tauri\target\x86_64-pc-windows-msvc\release\zerror-cli.exe --version
-
-      - name: Native regression and skill update checks
-        run: npm run test:release -- --phase native --release --target x86_64-pc-windows-msvc --cli src-tauri/target/x86_64-pc-windows-msvc/release/zerror-cli.exe --output output/release-native
-      - name: Install the generated Windows package
-        shell: pwsh
-        run: |
-          $packages = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe)
-          if ($packages.Count -ne 1) { throw "Expected exactly one installer" }
-          $directory = Join-Path $env:RUNNER_TEMP 'zerror-installed'
-          $installer = Start-Process -FilePath $packages[0].FullName -ArgumentList @('/S', "/D=$directory") -Wait -PassThru
-          if ($installer.ExitCode -ne 0) { throw "Installer failed: $($installer.ExitCode)" }
-          $cli = Join-Path $directory 'zerror-cli.exe'
-          if (!(Test-Path $cli)) { throw 'Native CLI missing from installed package' }
-          $launcher = Join-Path $env:LOCALAPPDATA 'ZError\bin\zerror.cmd'
-          if (!(Test-Path $launcher)) { throw 'CLI launcher was not installed automatically' }
-          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
-          $command = Get-Command zerror -CommandType Application -ErrorAction Stop
-          if ($command.Source -ne $launcher) { throw 'Installed zerror is not discoverable through user PATH' }
-          zerror --version
-          if ($LASTEXITCODE -ne 0) { throw 'Installed zerror launcher failed' }
-          "ZERROR_INSTALLED_CLI=$cli" >> $env:GITHUB_ENV
-      - name: Installed desktop functional regression
-        shell: pwsh
-        run: npm run test:release -- --phase desktop --start --cli "$env:ZERROR_INSTALLED_CLI" --output output/release-desktop
-      - name: Upload regression evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-regression-x86_64-pc-windows-msvc-${{ github.run_id }}
-          path: |
-            output/release-native/
-            output/release-desktop/
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Upload installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
