@@ -44,7 +44,14 @@ export type ThinkingRuntimeOptions = {
   /** @deprecated */
   thinkingOffReasoningEffortNone?: boolean
   thinkingEffort?: AIModel['thinkingEffort']
+  /** 思考预算（thinking_budget），0/未设走默认值 */
+  thinkingBudget?: AIModel['thinkingBudget']
 }
+
+/** 思考过程默认上限：不加限制时，思考模型可能连续推理几十秒才出第一个答案字 */
+const DEFAULT_THINKING_BUDGET = 1024
+/** 支持 thinking_budget 的模型：qwen3.5 及以后的混合思考系列（含 qwen4） */
+const THINKING_BUDGET_MODEL_RE = /qwen(?:3\.[5-9]|4)/i
 
 const THINKING_EFFORTS: NonNullable<AIModel['thinkingEffort']>[] = ['low', 'medium', 'high', 'max']
 
@@ -60,6 +67,10 @@ const normalizeOffResponsesEffort = (
 
 export const normalizeThinkingOptions = (options?: ThinkingRuntimeOptions) => {
   const effort = options?.thinkingEffort
+  const rawBudget = options?.thinkingBudget
+  const budget = Number.isFinite(rawBudget)
+    ? Math.max(0, Math.floor(rawBudget as number))
+    : DEFAULT_THINKING_BUDGET
   return {
     enable: options?.enableThinking === true,
     offEnableThinkingFalse: options?.thinkingOffEnableThinkingFalse !== false,
@@ -67,7 +78,8 @@ export const normalizeThinkingOptions = (options?: ThinkingRuntimeOptions) => {
     offResponsesEffort: normalizeOffResponsesEffort(options),
     effort: THINKING_EFFORTS.includes(effort as NonNullable<AIModel['thinkingEffort']>)
       ? effort!
-      : 'medium'
+      : 'medium',
+    budget
   }
 }
 
@@ -105,6 +117,11 @@ const buildCommonHelpers = () => `
     // chat
     if (ENABLE_THINKING) {
       payload.reasoning_effort = effort;
+      // 限制思考长度：思考阶段每多一个 token 都直接推迟答案首字
+      const budget = (THINKING && THINKING.budget) || 0;
+      if (budget > 0 && /qwen(?:3\\.[5-9]|4)/i.test(String(PRESET_MODEL_ID || ''))) {
+        payload.thinking_budget = budget;
+      }
       return;
     }
     if (!THINKING || THINKING.offEnableThinkingFalse !== false) {

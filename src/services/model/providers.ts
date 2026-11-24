@@ -49,6 +49,11 @@ const helpersFor = (input: ProviderRequest, config: ProviderConfig, modelId: str
       // chat
       if (ENABLE_THINKING) {
         payload.reasoning_effort = effort;
+        // 限制思考长度：思考阶段每多一个 token 都直接推迟答案首字
+        const budget = (THINKING && THINKING.budget) || 0;
+        if (budget > 0 && /qwen(?:3\.[5-9]|4)/i.test(String(PRESET_MODEL_ID || ''))) {
+          payload.thinking_budget = budget;
+        }
         return;
       }
       if (!THINKING || THINKING.offEnableThinkingFalse !== false) {

@@ -187,8 +187,34 @@ async function fetchRaw(url: string, init: Record<string, unknown>, ms: number, 
   }
 }
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+/**
+ * secureFetch 走 Rust 通道，而 Rust 侧 reqwest 用的是 redirect::Policy::none()，
+ * 302/301 会原样返回（ok=false）→ 引擎直接判失败。
+ * bing 在国内经常先 302 到 cn.bing.com，所以这里手动跟随重定向。
+ */
+async function fetchRawFollowingRedirects(
+  url: string,
+  init: Record<string, unknown>,
+  ms: number,
+  signal?: AbortSignal,
+  maxHops = 3
+): Promise<Response> {
+  let current = url
+  for (let hop = 0; ; hop++) {
+    const response = await fetchRaw(current, init, ms, signal)
+    if (!REDIRECT_STATUSES.has(response.status)) return response
+    const location = response.headers.get('location')
+    void response.body?.cancel?.().catch(() => undefined)
+    if (!location) return response
+    if (hop >= maxHops) throw new Error(`too many redirects from ${url.split('?')[0]}`)
+    current = new URL(location, current).toString()
+  }
+}
+
 async function fetchHtml(url: string, ms: number, signal?: AbortSignal, acceptLang = ACCEPT_LANG): Promise<string> {
-  const response = await fetchRaw(
+  const response = await fetchRawFollowingRedirects(
     url,
     { headers: { 'user-agent': USER_AGENT, 'accept-language': acceptLang }, redirect: 'follow' },
     ms,
