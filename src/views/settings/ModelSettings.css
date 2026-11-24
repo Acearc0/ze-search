@@ -341,6 +341,7 @@
   align-items: center;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
 }
 
@@ -429,6 +430,9 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--platform-detail-header-text);
+  /* 标题不参与压缩，否则窄面板里会被挤成「模型管 / 理」两行 */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .platform-description {
@@ -893,7 +897,12 @@ input[type="password"].api-key-input::-ms-reveal {
 
 .header-actions{
   display: flex;
+  align-items: center;
   gap: 10px;
+  /* 面板变窄时宁可换行，也不要让按钮被挤到互相重叠 */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* 添加模型下拉按钮 */
@@ -1001,7 +1010,13 @@ input[type="password"].api-key-input::-ms-reveal {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 0 10px;
+  /* 必须覆盖 .icon-action-btn--sm 的 22px 定宽：
+     否则「拉取模型」四个字会从按钮盒子里溢出，压到左边的分类切换器与右边的 + 按钮上 */
+  width: auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
   font-size: 12px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
