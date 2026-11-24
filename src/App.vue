@@ -1,0 +1,922 @@
+<script setup lang="ts">
+import { secureStorageState, cleanupLegacySecrets, redactNative, authorizeSecureStorage } from './services/security/secureStore';
+import { sessions as agentSessions, chatStoreReady, persistSoon } from './services/agent/chatStore';
+import { startInstalledWebsiteSync } from './services/agent/websiteRepository';
+import { siteAccountsReady } from './services/agent/siteAccounts';
+import { modelConfigManager } from './services/model/config';
+import { settingsManager } from './services/app/settings';
+import { ref, onMounted, onUnmounted, computed, defineAsyncComponent, reactive } from "vue";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import AppHeader from "./views/AppHeader.vue";
+import Sidebar from "./views/Sidebar.vue";
+import UpdateDialog from "./components/ui/UpdateDialog.vue";
+import Home from "./views/Home.vue";
+import LoginDialog from "./components/ui/LoginDialog.vue";
+import { restoreAuthSession } from "./services/app/auth";
+import FileTree from "./views/questions/FileTree.vue";
+import { databaseService } from "./services/app/database";
+import { parseDifficulty, parseImportance, parseMastery } from "./utils/question/questionMetrics";
+import { initializationService } from "./services/app/initialization";
+import { initGlobalTheme } from "./composables/useTheme";
+import { useAppUpdate } from "./composables/useAppUpdate";
+import { useExclusiveMenu } from "./composables/useExclusiveMenu";
+import { agentBrowserExpanded } from './services/agent/agentBrowser';
+
+// Split independent workspaces while keeping their existing mounted lifetime.
+const Settings = defineAsyncComponent(() => import('./views/Settings.vue'));
+const QuestionBank = defineAsyncComponent(() => import('./views/QuestionBank.vue'));
+const CampusWorkspace = defineAsyncComponent(() => import('./views/campus/CampusWorkspace.vue'));
+const Study = defineAsyncComponent(() => import('./views/Study.vue'));
+const Agent = defineAsyncComponent(() => import('./views/Agent.vue'));
+
+// 当前活跃的页面
+const activeTab = ref('home');
+const visitedWorkspaces = reactive(new Set(['home']));
+// 顶层 tab 切换时用于触发各视图折叠的触发器
+const collapseTrigger = ref(0);
+const questionBankFocusFolderId = ref<number | null>(null);
+const questionBankFocusRequestKey = ref(0);
+const loginDialogVisible = ref(false);
+const reloadSecureStore = async () => {
+  if (!secureStorageState.requiresAuthorization || await authorizeSecureStorage()) window.location.reload()
+}
+
+const openLoginDialog = () => {
+  agentBrowserExpanded.value = false
+  loginDialogVisible.value = true
+}
+
+const closeLoginDialog = (success = false) => {
+  if (!loginDialogVisible.value) return
+  loginDialogVisible.value = false
+  window.dispatchEvent(new CustomEvent('login-dialog-finished', { detail: success }))
+}
+
+const {
+  showUpdateDialog,
+  updateInfo,
+  currentVersion,
+  downloadFileName,
+  downloadUrl,
+  nativeUpdater,
+  checkForUpdates,
+  closeDialog: handleUpdateDialogClose,
+  handleDialogDownload,
+  handleLater,
+  handleWeekLater,
+} = useAppUpdate();
+
+const pinAppViewport = () => {
+  if (document.documentElement.scrollTop) document.documentElement.scrollTop = 0
+  if (document.documentElement.scrollLeft) document.documentElement.scrollLeft = 0
+  if (document.body.scrollTop) document.body.scrollTop = 0
+  if (document.body.scrollLeft) document.body.scrollLeft = 0
+  const app = document.getElementById('app')
+  if (app?.scrollTop) app.scrollTop = 0
+  if (app?.scrollLeft) app.scrollLeft = 0
+}
+
+// 暴露到全局 window，供开发者控制台调试
+onMounted(() => {
+  document.querySelectorAll('.assistant-text style, .agent-html style, .agent-html-preview style')
+    .forEach((el) => el.remove())
+  pinAppViewport()
+  void Promise.all([siteAccountsReady, modelConfigManager.ready, settingsManager.ready, chatStoreReady]).then(async () => {
+    const safe = await redactNative(JSON.parse(JSON.stringify(agentSessions.value)))
+    for (const session of agentSessions.value) {
+      const next = safe.find((item: { id: string }) => item.id === session.id)
+      if (next) Object.assign(session, next)
+    }
+    persistSoon(true)
+    await cleanupLegacySecrets()
+  }).catch(() => undefined)
+  document.addEventListener('scroll', pinAppViewport, true)
+
+  ;(window as any).startTutorial = () => {
+    localStorage.removeItem('tutorial_stepper_finished');
+    window.dispatchEvent(new Event('start-tutorial'));
+    console.log('新手引导已重置并启动！');
+  };
+});
+
+// 导航处理函数
+const handleNavigateTab = (event: Event) => {
+  const tab = (event as CustomEvent<string>).detail
+  if (typeof tab === 'string' && tab) {
+    handleNavigate(tab)
+  }
+}
+
+const handleNavigate = (tab: string) => {
+  if (tab === 'browser') {
+    agentBrowserExpanded.value = true;
+    tab = 'agent';
+  }
+  if (tab === 'import-tasks') {
+    tab = 'agent'
+  }
+  visitedWorkspaces.add(tab);
+  // 仅在实际切换到不同 tab 时触发折叠
+  if (activeTab.value !== tab) {
+    activeTab.value = tab;
+    // 增加触发器版本，通知子视图收缩详情面板
+    collapseTrigger.value++;
+  } else {
+    activeTab.value = tab;
+  }
+};
+
+// 步骤条跳转引导
+const handleGuideAction = (target: string) => {
+  if (target === 'model-settings') {
+    handleNavigate('settings')
+    window.dispatchEvent(new Event('open-model-settings'))
+  } else if (target === 'home') {
+    handleNavigate('home')
+  } else if (target === 'ocs-config') {
+    handleNavigate('home')
+    window.dispatchEvent(new Event('open-ocs-config'))
+  }
+}
+
+const handleOpenQuestionFolder = (folderId: number) => {
+  handleNavigate('questions');
+  questionBankFocusFolderId.value = folderId;
+  questionBankFocusRequestKey.value++;
+};
+
+const showImportDialog = ref(false);
+const closeImportDialog = () => {
+  showImportDialog.value = false;
+};
+
+const importItems = ref<any[]>([]);
+const importTreeRef = ref<any>(null);
+const selectedImportFolderId = ref<number | null>(null);
+const selectedImportFolderName = ref("");
+const importing = ref(false);
+type EditableTarget = HTMLInputElement | HTMLTextAreaElement
+
+const inputContextMenuVisible = ref(false)
+useExclusiveMenu('global-input-context-menu', inputContextMenuVisible)
+const inputContextMenuX = ref(0)
+const inputContextMenuY = ref(0)
+const inputContextMenuTarget = ref<EditableTarget | null>(null)
+
+const supportedInputTypes = new Set(['', 'text', 'search', 'url', 'tel', 'password', 'email', 'number'])
+
+const isEditableTarget = (target: EventTarget | null): target is EditableTarget => {
+  if (target instanceof HTMLTextAreaElement) return true
+  if (target instanceof HTMLInputElement) return supportedInputTypes.has(target.type)
+  return false
+}
+
+const findEditableTarget = (target: EventTarget | null): EditableTarget | null => {
+  let current = target instanceof HTMLElement ? target : null
+  while (current) {
+    if (isEditableTarget(current)) return current
+    current = current.parentElement
+  }
+  return null
+}
+
+const getSelectionRange = (target: EditableTarget) => {
+  try {
+    const start = target.selectionStart ?? 0
+    const end = target.selectionEnd ?? start
+    return { start, end }
+  } catch {
+    return { start: 0, end: 0 }
+  }
+}
+
+const getSelectedText = (target: EditableTarget | null) => {
+  if (!target) return ''
+  const { start, end } = getSelectionRange(target)
+  return target.value.slice(start, end)
+}
+
+const focusTarget = (target: EditableTarget | null) => {
+  if (!target) return
+  target.focus()
+}
+
+const emitInputEvent = (target: EditableTarget) => {
+  target.dispatchEvent(new Event('input', { bubbles: true }))
+  target.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+const writeClipboardText = async (text: string) => {
+  await writeText(text)
+  return true
+}
+
+const readClipboardText = async () => {
+  try {
+    return await readText()
+  } catch {
+    return null
+  }
+}
+
+const replaceSelectedText = (target: EditableTarget, text: string) => {
+  focusTarget(target)
+  try {
+    const { start, end } = getSelectionRange(target)
+    target.setRangeText(text, start, end, 'end')
+  } catch {
+    target.value = text
+  }
+  emitInputEvent(target)
+}
+
+const hideInputContextMenu = () => {
+  inputContextMenuVisible.value = false
+  inputContextMenuTarget.value = null
+}
+
+const updateInputContextMenuPosition = (x: number, y: number) => {
+  const menuWidth = 150
+  const menuHeight = 164
+  inputContextMenuX.value = Math.min(x, window.innerWidth - menuWidth - 8)
+  inputContextMenuY.value = Math.min(y, window.innerHeight - menuHeight - 8)
+}
+
+const handleGlobalContextMenu = (event: MouseEvent) => {
+  const menuElement = event.target instanceof HTMLElement ? event.target.closest('.global-input-context-menu') : null
+  if (menuElement) return
+
+  const target = findEditableTarget(event.target)
+  if (!target || target.disabled) {
+    hideInputContextMenu()
+    return
+  }
+
+  event.preventDefault()
+  focusTarget(target)
+  inputContextMenuTarget.value = target
+  updateInputContextMenuPosition(event.clientX, event.clientY)
+  inputContextMenuVisible.value = true
+}
+
+const handleGlobalPointerDown = (event: MouseEvent) => {
+  const menuElement = event.target instanceof HTMLElement ? event.target.closest('.global-input-context-menu') : null
+  if (!menuElement) {
+    hideInputContextMenu()
+  }
+}
+
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    hideInputContextMenu()
+  }
+}
+
+const canCutInput = computed(() => {
+  const target = inputContextMenuTarget.value
+  return !!target && !target.readOnly && getSelectedText(target).length > 0
+})
+
+const canCopyInput = computed(() => getSelectedText(inputContextMenuTarget.value).length > 0)
+
+const canPasteInput = computed(() => {
+  const target = inputContextMenuTarget.value
+  return !!target && !target.readOnly && !target.disabled
+})
+
+const canSelectAllInput = computed(() => {
+  const target = inputContextMenuTarget.value
+  return !!target && target.value.length > 0
+})
+
+const handleInputCopy = async () => {
+  const target = inputContextMenuTarget.value
+  const text = getSelectedText(target)
+  if (!target || !text) return
+  focusTarget(target)
+  await writeClipboardText(text)
+  hideInputContextMenu()
+}
+
+const handleInputCut = async () => {
+  const target = inputContextMenuTarget.value
+  const text = getSelectedText(target)
+  if (!target || target.readOnly || !text) return
+  focusTarget(target)
+
+  try {
+    await writeText(text)
+  } catch {
+    return
+  }
+
+  const { start } = getSelectionRange(target)
+  replaceSelectedText(target, '')
+  try {
+    target.setSelectionRange(start, start)
+  } catch {}
+  hideInputContextMenu()
+}
+
+const handleInputPaste = async () => {
+  const target = inputContextMenuTarget.value
+  if (!target || target.readOnly || target.disabled) return
+  focusTarget(target)
+  const text = await readClipboardText()
+  if (text === null) return
+  replaceSelectedText(target, text)
+  hideInputContextMenu()
+}
+
+const handleInputSelectAll = () => {
+  const target = inputContextMenuTarget.value
+  if (!target) return
+  focusTarget(target)
+  target.select()
+  hideInputContextMenu()
+}
+
+const normalizeImportItems = (items: any): any[] => {
+  const arr = Array.isArray(items) ? items : [];
+  return arr.map((x: any) => {
+    const q = x?.Question ?? x?.question ?? "";
+    const opts = x?.Options ?? x?.options ?? null;
+    const ans = x?.Answer ?? x?.answer ?? "";
+    const type = x?.QuestionType ?? x?.question_type ?? "";
+    return {
+      content: String(q),
+      options: Array.isArray(opts) ? opts : (typeof opts === "string" ? opts : null),
+      answer: String(ans),
+      question_type: String(type),
+      importance: parseImportance(x?.Importance ?? x?.importance),
+      mastery: parseMastery(x?.Mastery ?? x?.mastery),
+      difficulty: parseDifficulty(x?.Difficulty ?? x?.difficulty),
+    };
+  });
+};
+
+const handleFolderSelect = (folderId: number, folderName: string) => {
+  selectedImportFolderId.value = folderId;
+  selectedImportFolderName.value = folderName;
+};
+
+  const handleImportConfirm = async () => {
+    if (selectedImportFolderId.value === null) return;
+    if (!importItems.value || importItems.value.length === 0) return;
+    importing.value = true;
+    try {
+      await databaseService.connect();
+      let count = 0;
+      for (const item of importItems.value) {
+        const content = String(item.content || item.question || "");
+        if (!content) continue;
+        const optionsStr = Array.isArray(item.options) ? item.options.join("\n") : (typeof item.options === "string" ? item.options : undefined);
+        const answerStr = String(item.answer ?? "");
+        await databaseService.addQuestion({
+          content,
+          options: optionsStr,
+          answer: answerStr,
+          question_type: item.question_type,
+          folderId: selectedImportFolderId.value,
+          importance: item.importance,
+          mastery: item.mastery,
+          difficulty: item.difficulty,
+        });
+        count++;
+      }
+      showImportDialog.value = false;
+      
+      // 发出全局事件，通知其他组件刷新数据
+      try {
+        const { emit } = await import('@tauri-apps/api/event');
+        await emit('refresh-data');
+      } catch {}
+
+      try { importTreeRef.value?.refreshData?.(); } catch {}
+      alert(`成功导入 ${count} 条数据！`);
+    } catch (e) {
+      console.error('导入失败:', e);
+      alert('导入失败: ' + (e as Error).message);
+    } finally {
+      importing.value = false;
+    }
+  };
+
+onMounted(async () => {
+  try {
+    const { listen } = await import('@tauri-apps/api/event')
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await listen('open-import-dialog', async (event: any) => {
+      console.log('收到导入事件:', event);
+      const payload = event?.payload || {};
+      importItems.value = normalizeImportItems(payload.items);
+      showImportDialog.value = true;
+      
+      // 聚焦当前窗口（主窗口）
+      try {
+        const win = getCurrentWindow()
+        await win.setFocus()
+      } catch (e) {
+        console.error('聚焦窗口失败:', e)
+      }
+    })
+  } catch (error) {
+    console.error('监听事件失败:', error);
+  }
+  (window as any).__appImportDialogReady = true;
+  window.addEventListener('navigate-tab', handleNavigateTab as EventListener)
+  window.addEventListener('open-login', openLoginDialog)
+  document.addEventListener('contextmenu', handleGlobalContextMenu, true)
+  document.addEventListener('mousedown', handleGlobalPointerDown, true)
+  document.addEventListener('keydown', handleGlobalKeydown, true)
+  window.addEventListener('resize', hideInputContextMenu)
+  window.addEventListener('blur', hideInputContextMenu)
+});
+
+let stopWebsiteSync: (() => void) | undefined
+
+// 应用初始化
+onMounted(async () => {
+  stopWebsiteSync = startInstalledWebsiteSync()
+  try {
+    console.log('开始应用初始化...');
+    await initGlobalTheme();
+    console.log('主题系统初始化完成');
+    const authRestore = restoreAuthSession();
+    await initializationService.initialize();
+    console.log('应用初始化完成');
+    await authRestore;
+
+    await checkForUpdates();
+  } catch (error) {
+    console.error('应用初始化失败:', error);
+  }
+});
+
+onUnmounted(() => {
+  stopWebsiteSync?.()
+  window.removeEventListener('navigate-tab', handleNavigateTab as EventListener)
+  window.removeEventListener('open-login', openLoginDialog)
+  document.removeEventListener('contextmenu', handleGlobalContextMenu, true)
+  document.removeEventListener('mousedown', handleGlobalPointerDown, true)
+  document.removeEventListener('keydown', handleGlobalKeydown, true)
+  window.removeEventListener('resize', hideInputContextMenu)
+  window.removeEventListener('blur', hideInputContextMenu)
+  document.removeEventListener('scroll', pinAppViewport, true)
+})
+
+
+
+</script>
+
+<template>
+  <div class="app-container">
+    <!-- 自定义Header -->
+    <AppHeader :active-tab="activeTab" @guide-to="handleGuideAction" @navigate="handleNavigate" />
+
+    
+    <!-- 主要内容区域 -->
+    <div class="main-content">
+      <!-- 侧边导航栏 -->
+      <Sidebar :active-tab="activeTab" @navigate="handleNavigate" />
+      
+      <!-- 内容区域 -->
+      <div class="content-area">
+        <div v-show="activeTab === 'home'" class="content-view">
+          <Home :collapse-trigger="collapseTrigger" @navigate="handleNavigate" />
+        </div>
+
+        <div v-show="activeTab === 'questions'" class="content-view">
+          <QuestionBank v-if="visitedWorkspaces.has('questions')"
+            :collapse-trigger="collapseTrigger"
+            :focus-folder-id="questionBankFocusFolderId"
+            :focus-folder-request-key="questionBankFocusRequestKey"
+          />
+        </div>
+
+        <div v-show="activeTab === 'campus'" class="content-view">
+          <CampusWorkspace v-if="visitedWorkspaces.has('campus')"
+            :active="activeTab === 'campus'"
+            :obscured="loginDialogVisible || showUpdateDialog || Boolean(secureStorageState.error)"
+          />
+        </div>
+
+        <div v-show="activeTab === 'study'" class="content-view">
+          <Study v-if="visitedWorkspaces.has('study')" />
+        </div>
+
+        <div v-show="activeTab === 'agent' || activeTab === 'import-tasks'" class="content-view">
+          <Agent v-if="visitedWorkspaces.has('agent')" :active="activeTab === 'agent' || activeTab === 'import-tasks'" :browser-obscured="loginDialogVisible || showUpdateDialog" @open-folder="handleOpenQuestionFolder" />
+        </div>
+
+        <div v-show="activeTab === 'settings'" class="content-view">
+          <Settings v-if="visitedWorkspaces.has('settings')" @open-question-folder="handleOpenQuestionFolder" />
+        </div>
+      </div>
+    </div>
+    
+    <div v-if="secureStorageState.error" class="secure-storage-error" role="alert">{{ secureStorageState.error }} <button type="button" :disabled="secureStorageState.authorizing" @click="reloadSecureStore">{{ secureStorageState.requiresAuthorization ? '恢复授权并重新加载' : '重新加载' }}</button></div>
+    <LoginDialog
+      :visible="loginDialogVisible"
+      @close="closeLoginDialog"
+      @success="closeLoginDialog(true)"
+    />
+
+    <!-- 版本更新对话框 -->
+    <UpdateDialog
+      :visible="showUpdateDialog"
+      :version-info="updateInfo"
+      :current-version="currentVersion"
+      :download-file-name="downloadFileName"
+      :download-url="downloadUrl"
+      :native-updater="nativeUpdater"
+      @close="handleUpdateDialogClose"
+      @download="handleDialogDownload"
+      @later="handleLater"
+      @week-later="handleWeekLater"
+    />
+  </div>
+
+  <div v-if="showImportDialog" class="modal" @click="closeImportDialog">
+    <div class="modal-content" @click.stop>
+      <div class="modal-header">
+        <span>导入</span>
+        <button @click="closeImportDialog">×</button>
+      </div>
+      <div class="modal-body">
+        <FileTree style="border-radius: 6px;" ref="importTreeRef" @folder-select="handleFolderSelect" />
+      </div>
+      <div class="modal-footer">
+        <div class="footer-info">
+          <span>目标文件夹：{{ selectedImportFolderName || '未选择' }}</span>
+          <span style="margin-left:12px;">待导入：{{ importItems.length }} 条</span>
+        </div>
+        <div class="footer-actions">
+          <button @click="closeImportDialog" :disabled="importing">取消</button>
+          <button @click="handleImportConfirm" :disabled="importing || selectedImportFolderId === null || !importItems.length">导入</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <Transition name="context-menu-pop">
+    <div
+      v-if="inputContextMenuVisible"
+      class="global-input-context-menu"
+      :style="{ left: `${inputContextMenuX}px`, top: `${inputContextMenuY}px` }"
+    >
+      <button class="global-input-context-menu-item" :disabled="!canCutInput" @click="handleInputCut">剪切</button>
+      <button class="global-input-context-menu-item" :disabled="!canCopyInput" @click="handleInputCopy">复制</button>
+      <button class="global-input-context-menu-item" :disabled="!canPasteInput" @click="handleInputPaste">粘贴</button>
+      <button class="global-input-context-menu-item" :disabled="!canSelectAllInput" @click="handleInputSelectAll">全选</button>
+    </div>
+  </Transition>
+</template>
+
+<style scoped>
+.logo.vite:hover {
+  filter: drop-shadow(0 0 2em #747bff);
+}
+
+.logo.vue:hover {
+  filter: drop-shadow(0 0 2em #249b73);
+}
+
+</style>
+<style>
+
+
+
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  max-width: none;
+  background-color: var(--bg-tertiary, #f4f4f4);
+  color: var(--text-primary, #2d3748);
+  overflow: hidden;
+  overscroll-behavior: none;
+  overflow-anchor: none;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+  max-width: none;
+  overflow: hidden;
+  background-color: var(--bg-tertiary, #f4f4f4);
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  max-width: none;
+  background-color: var(--bg-tertiary, #f4f4f4);
+}
+
+.main-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+.content-area {
+  margin-bottom: 100px;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--bg-primary, #f4f4f4);
+  position: relative;
+}
+
+/* 确保所有页面组件占满容器并正确定位 */
+.content-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overflow-anchor: none;
+}
+
+.content-view.is-fixed {
+  overflow: hidden;
+}
+
+.content-view > * {
+  width: 100%;
+  height: 100%;
+}
+
+.page-switch-enter-active,
+.page-switch-leave-active {
+  transition:
+    opacity 360ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 360ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.page-switch-enter-active {
+  z-index: 1;
+}
+
+.page-switch-leave-active {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.page-switch-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.page-switch-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-switch-enter-active,
+  .page-switch-leave-active {
+    transition: none;
+  }
+}
+
+
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+
+  color: var(--text-primary, #0f0f0f);
+  background-color: var(--bg-tertiary, #f6f6f6);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* markstream-vue/index.css ships an unscoped Tailwind .container */
+#app .container,
+.app-container {
+  max-width: none;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: 0.75s;
+}
+
+.logo.tauri:hover {
+  filter: drop-shadow(0 0 2em #24c8db);
+}
+
+.row {
+  display: flex;
+  justify-content: center;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: #535bf2;
+}
+
+.global-input-context-menu {
+  position: fixed;
+  z-index: 100000;
+  min-width: 150px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--context-menu-border, rgba(255, 255, 255, 0.55));
+  background: var(--context-menu-bg, rgba(255, 255, 255, 0.42));
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.12), inset 0 0.5px 0 rgba(255, 255, 255, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transform-origin: top left;
+  overflow: visible;
+}
+
+.context-menu-pop-enter-active,
+.context-menu-pop-leave-active {
+  transition: opacity 0.14s ease, transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.context-menu-pop-enter-from,
+.context-menu-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+}
+
+.context-menu-pop-enter-to,
+.context-menu-pop-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.global-input-context-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #2d3748);
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.global-input-context-menu-item:hover:not(:disabled) {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.06));
+}
+
+.global-input-context-menu-item:disabled {
+  color: var(--text-disabled, #a0aec0);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .global-input-context-menu {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--bg-secondary, #ffffff);
+  }
+}
+
+h1 {
+  text-align: center;
+}
+
+input,
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-primary, #0f0f0f);
+  background-color: var(--bg-primary, #ffffff);
+  transition: border-color 0.25s;
+  /* box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2); */
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--color-primary, #396cd8);
+}
+button:active {
+  border-color: var(--color-primary, #396cd8);
+  background-color: var(--active-bg, #e8e8e8);
+}
+
+input,
+button {
+  outline: none;
+}
+
+#greet-input {
+  margin-right: 5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: var(--text-primary, #f6f6f6);
+    background-color: var(--bg-secondary, #2f2f2f);
+  }
+
+  a:hover {
+    color: var(--color-info, #24c8db);
+  }
+
+  input,
+  button {
+    color: var(--text-primary, #ffffff);
+    background-color: var(--bg-secondary, #0f0f0f98);
+  }
+  button:active {
+    background-color: var(--active-bg, #0f0f0f69);
+  }
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  width: 600px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color, #ddd);
+}
+
+.modal-header button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-secondary, #666);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.modal-body {
+  padding: 12px;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-top: 1px solid var(--border-color, #ddd);
+}
+
+.footer-actions button {
+  margin-left: 8px;
+}
+
+</style>
+
+<style scoped>
+.secure-storage-error { position: fixed; z-index: 20000; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100vw - 40px); padding: 10px 16px; border-radius: 10px; background: var(--bg-secondary, #fff); color: var(--text-primary, #333); font-size: 13px; box-shadow: 0 4px 24px #0002; }
+</style>

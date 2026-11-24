@@ -1,0 +1,130 @@
+use tauri::{AppHandle, Manager};
+
+#[derive(Clone, Copy)]
+pub struct WindowSizePreset {
+    pub preferred_width: f64,
+    pub preferred_height: f64,
+    pub min_width: f64,
+    pub min_height: f64,
+    pub width_ratio: f64,
+    pub height_ratio: f64,
+    pub max_width: f64,
+    pub max_height: f64,
+    use_work_area: bool,
+}
+
+impl WindowSizePreset {
+    pub const fn new(
+        preferred_width: f64,
+        preferred_height: f64,
+        min_width: f64,
+        min_height: f64,
+        width_ratio: f64,
+        height_ratio: f64,
+        max_width: f64,
+        max_height: f64,
+    ) -> Self {
+        Self {
+            preferred_width,
+            preferred_height,
+            min_width,
+            min_height,
+            width_ratio,
+            height_ratio,
+            max_width,
+            max_height,
+            use_work_area: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ResolvedWindowSize {
+    pub width: f64,
+    pub height: f64,
+    pub min_width: f64,
+    pub min_height: f64,
+}
+
+#[cfg(windows)]
+pub const MAIN_WINDOW_PRESET: WindowSizePreset = WindowSizePreset {
+    use_work_area: true,
+    ..WindowSizePreset::new(1280.0, 760.0, 780.0, 540.0, 0.84, 0.88, 1720.0, 1100.0)
+};
+
+#[cfg(not(windows))]
+pub const MAIN_WINDOW_PRESET: WindowSizePreset =
+    // 略加大：1920x1080 约 1180x740，笔记本仍按比例收敛
+    WindowSizePreset::new(1120.0, 740.0, 780.0, 540.0, 0.615, 0.685, 1280.0, 900.0);
+
+pub const URL_CONTENT_WINDOW_PRESET: WindowSizePreset =
+    WindowSizePreset::new(1200.0, 800.0, 1000.0, 600.0, 0.84, 0.86, 1720.0, 1180.0);
+
+pub const FILE_INFO_WINDOW_PRESET: WindowSizePreset =
+    WindowSizePreset::new(1280.0, 900.0, 960.0, 600.0, 0.84, 0.88, 1720.0, 1200.0);
+
+fn clamp(value: f64, min: f64, max: f64) -> f64 {
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value
+    }
+}
+
+pub fn resolve_window_size(app: &AppHandle, preset: WindowSizePreset) -> ResolvedWindowSize {
+    let mut width = preset.preferred_width;
+    let mut height = preset.preferred_height;
+    let mut min_width = preset.min_width.min(width);
+    let mut min_height = preset.min_height.min(height);
+
+    let monitor = app
+        .get_window("main")
+        .and_then(|window| window.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    if let Some(monitor) = monitor {
+        let scale_factor = monitor.scale_factor().max(1.0);
+        let screen = if preset.use_work_area {
+            &monitor.work_area().size
+        } else {
+            monitor.size()
+        };
+        let screen_width = screen.width as f64 / scale_factor;
+        let screen_height = screen.height as f64 / scale_factor;
+
+        let (available_width, available_height) = if preset.use_work_area {
+            (screen_width.max(1.0), screen_height.max(1.0))
+        } else {
+            (
+                (screen_width - 48.0).max(640.0),
+                (screen_height - 72.0).max(480.0),
+            )
+        };
+
+        let max_width = preset.max_width.min(available_width);
+        let max_height = preset.max_height.min(available_height);
+
+        width = clamp(
+            (screen_width * preset.width_ratio).floor(),
+            640.0_f64.min(max_width),
+            max_width,
+        );
+        height = clamp(
+            (screen_height * preset.height_ratio).floor(),
+            480.0_f64.min(max_height),
+            max_height,
+        );
+
+        min_width = preset.min_width.min(width);
+        min_height = preset.min_height.min(height);
+    }
+
+    ResolvedWindowSize {
+        width,
+        height,
+        min_width,
+        min_height,
+    }
+}

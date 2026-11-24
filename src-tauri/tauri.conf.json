@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ZError",
+  "version": "2.3.0",
+  "identifier": "com.zerror.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "default",
+        "url-content",
+        "file-info"
+      ]
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": {
+      "../public/browser-home.html": "browser-home.html",
+      "../public/browser-home": "browser-home",
+      "infoplist/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
+      "infoplist/zh_CN.lproj/InfoPlist.strings": "zh_CN.lproj/InfoPlist.strings"
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "entitlements": null,
+      "signingIdentity": null
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libsecret-tools"]
+      }
+    },
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      },
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "installerHooks": "installers/hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUzNEExNjk0RUExNEEyQzkKUldUSm9oVHFsQlpLNDd3L1M3amw5QmdnZUV0bURqekhZdHhoV1drQk51TEJvQS96aytDSGVXalYK",
+      "endpoints": [
+        "https://open.zerrorai.com/v1/app-updates/native/{{target}}/{{arch}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

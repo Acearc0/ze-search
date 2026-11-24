@@ -1,0 +1,66 @@
+# Logs
+logs
+public/__agent-inbox.json
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Test html
+test_query_get.html
+test_query.html
+test_request_logging.html
+test_rust_image_fetch.html
+test_url_detection.html
+
+# Vue component
+tooltip.vue
+
+
+
+
+
+.claude/
+test_jieba_puct.rs
+wqen3-max.js
+target/
+
+# local build / eval artifacts
+tmp/
+**/.zerror-updater-tmp/
+
+# 本机 CEF 内核（预编译 framework / 符号链接），不要推进 GitHub
+/Chromium Embedded Framework.framework/
+
+# Tauri updater private signing key (never commit)
+src-tauri/keys/*.key
+!src-tauri/keys/*.key.pub
+
+# 本地开发助手 Skill，不进仓库
+/.agents/skills/
+skills-lock.json
+
+# 本地构建、测试产物和编辑器工作区不提交到仓库
+/output/
+/*.code-workspace
+
+node_modules_partial/
+

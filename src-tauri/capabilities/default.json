@@ -1,0 +1,197 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main", "ai-assistant-*"],
+  "permissions": [
+    "core:default",
+    "core:path:default",
+    "fs:allow-resource-read-recursive",
+    "fs:default",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" },
+        { "path": "**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENTS/**" },
+        { "path": "$DOWNLOADS/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local" },
+        { "path": "$HOME/.local/share" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-create",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.local/share/zerror" },
+        { "path": "$HOME/.local/share/zerror/**" }
+      ]
+    },
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    {
+      "identifier": "opener:default",
+      "allow": [
+        { "url": "https://exa.ai/**" },
+        { "url": "https://api-docs.deepseek.com/**" },
+        { "url": "https://www.tavily.com/**" },
+        { "url": "https://brave.com/search/api/**" },
+        { "url": "https://you.com/**" },
+        {
+          "url": "https://app.zerror.cc/**"
+        },
+        {
+          "url": "https://webapi.zaizhexue.top/**"
+        },
+        {
+          "url": "http://localhost:8081/**"
+        },
+        {
+          "url": "http://127.0.0.1:8081/**"
+        }
+      ]
+    },
+    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$DOWNLOADS/**" },
+        { "path": "$HOME/Downloads/**" }
+      ]
+    },
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "updater:default",
+    "process:default",
+    "process:allow-restart",
+    "process:allow-exit",
+
+    "http:allow-fetch",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://**"
+        },
+        {
+          "url": "http://**"
+        },
+        {
+          "url": "http://*:*"
+        },
+        {
+          "url": "https://*:*"
+        },
+
+        {
+          "url": "http://localhost:*"
+        },
+        {
+          "url": "http://127.0.0.1:*"
+        },
+
+        {
+          "url": "http://localhost:11434/**"
+        },
+        {
+          "url": "http://127.0.0.1:11434/**"
+        }
+      ]
+    },
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-focus"
+  ]
+}

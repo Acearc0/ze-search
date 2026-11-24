@@ -1,0 +1,451 @@
+<template>
+  <div class="settings-page">
+
+    <div class="settings-layout">
+      <SettingsNav v-model="activeCategory" />
+
+      <!-- 右侧设置内容 -->
+      <div class="settings-content">
+        <Transition name="page-switch">
+          <div v-if="activeCategory === 'general'" key="general" class="settings-section settings-card-stagger">
+            <div class="settings-inner-wrapper general-scroll-wrap">
+              <div class="settings-content-wrapper general-scroll-content" ref="generalScrollContent" @scroll="onGeneralScroll">
+                <GeneralSettings @open-question-folder="handleOpenQuestionFolder" />
+              </div>
+              <div class="custom-scrollbar" :class="{ 'is-visible': generalScrollbarVisible }" ref="generalScrollbar" @mousedown="onGeneralScrollbarMousedown">
+                <div class="custom-scrollbar-thumb" ref="generalScrollbarThumb"></div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'agent'" key="agent" class="settings-section agent-settings-layout" :class="{ 'agent-skill-detail-layout': agentSkillDetailOpen }">
+            <div class="settings-inner-wrapper" :class="agentSkillDetailOpen ? 'agent-detail-fill' : 'agent-scroll-wrap'">
+              <div
+                class="settings-content-wrapper"
+                :class="agentSkillDetailOpen ? 'agent-detail-content' : 'agent-scroll-content'"
+                ref="agentScrollContent"
+                @scroll="onAgentScrollMaybe"
+              >
+                <AgentSettings @skill-detail-change="agentSkillDetailOpen = $event" />
+              </div>
+              <div v-if="!agentSkillDetailOpen" class="custom-scrollbar" :class="{ 'is-visible': agentScrollbarVisible }" ref="agentScrollbar" @mousedown="onAgentScrollbarMousedown">
+                <div class="custom-scrollbar-thumb" ref="agentScrollbarThumb"></div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'models'" key="models" class="settings-section model-settings-layout">
+            <div class="settings-inner-wrapper">
+              <ModelSettings />
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'search'" key="search" class="settings-section settings-card-stagger">
+            <div class="settings-inner-wrapper">
+              <div class="settings-content-wrapper">
+                <SearchSettings />
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="activeCategory === 'about'" key="about" class="settings-section settings-card-stagger">
+            <div class="settings-inner-wrapper about-scroll-wrap">
+              <div class="settings-content-wrapper about-scroll-content" ref="aboutScrollContent" @scroll="onAboutScroll">
+                <AboutApp />
+              </div>
+              <div class="custom-scrollbar" :class="{ 'is-visible': aboutScrollbarVisible }" ref="aboutScrollbar" @mousedown="onAboutScrollbarMousedown">
+                <div class="custom-scrollbar-thumb" ref="aboutScrollbarThumb"></div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </div>
+
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useWorkspaceEvent } from '../composables/useWorkspaceEvent'
+import { ref, watch } from 'vue'
+import GeneralSettings from './settings/GeneralSettings.vue'
+import AgentSettings from './settings/AgentSettings.vue'
+import ModelSettings from './settings/ModelSettings.vue'
+import AboutApp from './settings/AboutApp.vue'
+import SettingsNav from './settings/SettingsNav.vue'
+import SearchSettings from './settings/SearchSettings.vue'
+
+const emit = defineEmits<{
+  'open-question-folder': [folderId: number]
+}>()
+
+const activeCategory = ref('models')
+const agentSkillDetailOpen = ref(false)
+
+watch(activeCategory, (category) => {
+  if (category !== 'agent') agentSkillDetailOpen.value = false
+})
+
+const handleOpenModelSettings = () => {
+  activeCategory.value = 'models'
+}
+
+const handleOpenQuestionFolder = (folderId: number) => {
+  emit('open-question-folder', folderId)
+}
+
+
+// 常规设置自定义滚动条
+const generalScrollContent = ref<HTMLElement | null>(null)
+const generalScrollbar = ref<HTMLElement | null>(null)
+const generalScrollbarThumb = ref<HTMLElement | null>(null)
+const generalScrollbarVisible = ref(false)
+let generalScrollHideTimer: ReturnType<typeof setTimeout> | null = null
+let generalIsDragging = false
+let generalDragStartY = 0
+let generalDragStartScrollTop = 0
+
+const updateGeneralScrollbarThumb = () => {
+  const content = generalScrollContent.value
+  const thumb = generalScrollbarThumb.value
+  const bar = generalScrollbar.value
+  if (!content || !thumb || !bar) return
+  const ratio = content.clientHeight / content.scrollHeight
+  const barHeight = bar.clientHeight
+  thumb.style.height = Math.max(ratio * barHeight, 24) + 'px'
+  thumb.style.top = (content.scrollTop / content.scrollHeight) * barHeight + 'px'
+}
+
+const onGeneralScroll = () => {
+  generalScrollbarVisible.value = true
+  if (generalScrollHideTimer) clearTimeout(generalScrollHideTimer)
+  generalScrollHideTimer = setTimeout(() => { generalScrollbarVisible.value = false }, 1500)
+  updateGeneralScrollbarThumb()
+}
+
+const onGeneralScrollbarMousedown = (e: MouseEvent) => {
+  generalIsDragging = true
+  generalDragStartY = e.clientY
+  generalDragStartScrollTop = generalScrollContent.value?.scrollTop || 0
+  document.addEventListener('mousemove', onGeneralScrollbarMousemove)
+  document.addEventListener('mouseup', onGeneralScrollbarMouseup)
+}
+
+const onGeneralScrollbarMousemove = (e: MouseEvent) => {
+  if (!generalIsDragging || !generalScrollContent.value || !generalScrollbar.value) return
+  const dy = e.clientY - generalDragStartY
+  const ratio = generalScrollContent.value.scrollHeight / generalScrollbar.value.clientHeight
+  generalScrollContent.value.scrollTop = generalDragStartScrollTop + dy * ratio
+}
+
+const onGeneralScrollbarMouseup = () => {
+  generalIsDragging = false
+  document.removeEventListener('mousemove', onGeneralScrollbarMousemove)
+  document.removeEventListener('mouseup', onGeneralScrollbarMouseup)
+}
+
+// Agent 设置自定义滚动条
+const agentScrollContent = ref<HTMLElement | null>(null)
+// 概览滚动到底部后进入详情，不能沿用旧滚动位置把返回和保存按钮裁掉。
+watch(agentSkillDetailOpen, () => {
+  const content = agentScrollContent.value
+  if (!content) return
+  content.scrollTop = 0
+  // 输入框聚焦或 scrollIntoView 也可能滚动外层隐藏容器，进入详情时一并复位。
+  content.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+}, { flush: 'post' })
+const agentScrollbar = ref<HTMLElement | null>(null)
+const agentScrollbarThumb = ref<HTMLElement | null>(null)
+const agentScrollbarVisible = ref(false)
+let agentScrollHideTimer: ReturnType<typeof setTimeout> | null = null
+let agentIsDragging = false
+let agentDragStartY = 0
+let agentDragStartScrollTop = 0
+
+const updateAgentScrollbarThumb = () => {
+  const content = agentScrollContent.value
+  const thumb = agentScrollbarThumb.value
+  const bar = agentScrollbar.value
+  if (!content || !thumb || !bar) return
+  const ratio = content.clientHeight / content.scrollHeight
+  const barHeight = bar.clientHeight
+  thumb.style.height = Math.max(ratio * barHeight, 24) + 'px'
+  thumb.style.top = (content.scrollTop / content.scrollHeight) * barHeight + 'px'
+}
+
+const onAgentScroll = () => {
+  agentScrollbarVisible.value = true
+  if (agentScrollHideTimer) clearTimeout(agentScrollHideTimer)
+  agentScrollHideTimer = setTimeout(() => { agentScrollbarVisible.value = false }, 1500)
+  updateAgentScrollbarThumb()
+}
+
+const onAgentScrollMaybe = () => {
+  if (agentSkillDetailOpen.value) return
+  onAgentScroll()
+}
+
+const onAgentScrollbarMousedown = (e: MouseEvent) => {
+  agentIsDragging = true
+  agentDragStartY = e.clientY
+  agentDragStartScrollTop = agentScrollContent.value?.scrollTop || 0
+  document.addEventListener('mousemove', onAgentScrollbarMousemove)
+  document.addEventListener('mouseup', onAgentScrollbarMouseup)
+}
+
+const onAgentScrollbarMousemove = (e: MouseEvent) => {
+  if (!agentIsDragging || !agentScrollContent.value || !agentScrollbar.value) return
+  const dy = e.clientY - agentDragStartY
+  const ratio = agentScrollContent.value.scrollHeight / agentScrollbar.value.clientHeight
+  agentScrollContent.value.scrollTop = agentDragStartScrollTop + dy * ratio
+}
+
+const onAgentScrollbarMouseup = () => {
+  agentIsDragging = false
+  document.removeEventListener('mousemove', onAgentScrollbarMousemove)
+  document.removeEventListener('mouseup', onAgentScrollbarMouseup)
+}
+
+// 关于应用自定义滚动条
+const aboutScrollContent = ref<HTMLElement | null>(null)
+const aboutScrollbar = ref<HTMLElement | null>(null)
+const aboutScrollbarThumb = ref<HTMLElement | null>(null)
+const aboutScrollbarVisible = ref(false)
+let aboutScrollHideTimer: ReturnType<typeof setTimeout> | null = null
+let aboutIsDragging = false
+let aboutDragStartY = 0
+let aboutDragStartScrollTop = 0
+
+const updateAboutScrollbarThumb = () => {
+  const content = aboutScrollContent.value
+  const thumb = aboutScrollbarThumb.value
+  const bar = aboutScrollbar.value
+  if (!content || !thumb || !bar) return
+  const ratio = content.clientHeight / content.scrollHeight
+  const barHeight = bar.clientHeight
+  thumb.style.height = Math.max(ratio * barHeight, 24) + 'px'
+  thumb.style.top = (content.scrollTop / content.scrollHeight) * barHeight + 'px'
+}
+
+const onAboutScroll = () => {
+  aboutScrollbarVisible.value = true
+  if (aboutScrollHideTimer) clearTimeout(aboutScrollHideTimer)
+  aboutScrollHideTimer = setTimeout(() => { aboutScrollbarVisible.value = false }, 1500)
+  updateAboutScrollbarThumb()
+}
+
+const onAboutScrollbarMousedown = (e: MouseEvent) => {
+  aboutIsDragging = true
+  aboutDragStartY = e.clientY
+  aboutDragStartScrollTop = aboutScrollContent.value?.scrollTop || 0
+  document.addEventListener('mousemove', onAboutScrollbarMousemove)
+  document.addEventListener('mouseup', onAboutScrollbarMouseup)
+}
+
+const onAboutScrollbarMousemove = (e: MouseEvent) => {
+  if (!aboutIsDragging || !aboutScrollContent.value || !aboutScrollbar.value) return
+  const dy = e.clientY - aboutDragStartY
+  const ratio = aboutScrollContent.value.scrollHeight / aboutScrollbar.value.clientHeight
+  aboutScrollContent.value.scrollTop = aboutDragStartScrollTop + dy * ratio
+}
+
+const onAboutScrollbarMouseup = () => {
+  aboutIsDragging = false
+  document.removeEventListener('mousemove', onAboutScrollbarMousemove)
+  document.removeEventListener('mouseup', onAboutScrollbarMouseup)
+}
+useWorkspaceEvent('settings', 'open-model-settings', handleOpenModelSettings)
+</script>
+
+<style>
+.settings-page,
+.settings-popup {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:is(.settings-page, .settings-popup) :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"], .cm-content) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+</style>
+
+<style scoped>
+.settings-page {
+  height: 100%;
+  overflow: hidden;
+}
+
+.settings-layout {
+  background-color: var(--bg-primary, #f4f4f4);
+  height: 100%;
+  display: flex;
+  gap: 4px;
+}
+
+.settings-content {
+  box-sizing: border-box;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  margin-bottom: 5px;
+  margin-right: 5px;
+}
+
+.settings-section {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  margin: 0;
+}
+
+/* 常规、搜索和关于页面的卡片，以及 Agent 页的区块，各自在内容区域内浮入。 */
+.settings-card-stagger.page-switch-enter-from,
+.agent-settings-layout.page-switch-enter-from {
+  opacity: 1;
+  transform: none;
+}
+
+.settings-card-stagger.page-switch-enter-active {
+  transition-duration: 620ms;
+}
+
+.settings-card-stagger.page-switch-enter-active :deep(.network-group),
+.agent-settings-layout :deep(.agent-settings-overview > section),
+.agent-settings-layout :deep(.agent-website-detail) {
+  animation: settings-stagger-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+.settings-card-stagger.page-switch-enter-active :deep(.network-group:nth-child(2)),
+.agent-settings-layout :deep(.agent-settings-overview > section:nth-child(2)) { animation-delay: 70ms; }
+.settings-card-stagger.page-switch-enter-active :deep(.network-group:nth-child(3)) { animation-delay: 140ms; }
+.settings-card-stagger.page-switch-enter-active :deep(.network-group:nth-child(4)) { animation-delay: 210ms; }
+.settings-card-stagger.page-switch-enter-active :deep(.network-group:nth-child(5)) { animation-delay: 280ms; }
+.settings-card-stagger.page-switch-enter-active :deep(.network-group:nth-child(6)) { animation-delay: 350ms; }
+
+@keyframes settings-stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-card-stagger.page-switch-enter-active :deep(.network-group),
+  .agent-settings-layout :deep(.agent-settings-overview > section),
+  .agent-settings-layout :deep(.agent-website-detail) {
+    animation: none;
+  }
+}
+
+.settings-inner-wrapper {
+  height: 100%;
+}
+
+.general-scroll-wrap,
+.agent-scroll-wrap,
+.about-scroll-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.general-scroll-content,
+.agent-scroll-content,
+.about-scroll-content {
+  height: 100%;
+  overflow-y: scroll;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.general-scroll-content::-webkit-scrollbar,
+.agent-scroll-content::-webkit-scrollbar,
+.about-scroll-content::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-content-wrapper {
+  background: var(--bg-secondary);
+  padding: 24px;
+  padding-top: 0px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  border-radius: 4px;
+}
+
+.agent-detail-fill {
+  height: 100%;
+  overflow: hidden;
+}
+
+.agent-detail-content {
+  height: 100%;
+  padding: 0 16px 0 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.agent-skill-detail-layout :deep(.agent-settings) {
+  height: 100%;
+  min-height: 0;
+}
+
+.general-scroll-content.settings-content-wrapper,
+.agent-scroll-content.settings-content-wrapper,
+.about-scroll-content.settings-content-wrapper {
+  padding: 16px;
+  padding-top: 0;
+}
+
+.custom-scrollbar {
+  position: absolute;
+  right: 3px;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  cursor: pointer;
+}
+
+.custom-scrollbar.is-visible {
+  opacity: 1;
+}
+
+.custom-scrollbar-thumb {
+  width: 4px;
+  border-radius: 4px;
+  background: var(--custom-scrollbar-thumb);
+  transition: background 0.15s;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.custom-scrollbar-thumb:hover {
+  background: var(--custom-scrollbar-thumb-hover);
+}
+
+@media (max-width: 768px) {
+  .settings-page {
+    padding: 20px;
+  }
+
+  .settings-layout {
+    flex-direction: column;
+    height: auto;
+  }
+}
+</style>

@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" type="image/png" href="/app-icon.png">
+    <title>本地题库查询 · ZError</title>
+    <link rel="stylesheet" href="/query-details/styles.css">
+    <style>
+        :root {
+            color-scheme: light dark;
+            --canvas: #f5f5f7;
+            --panel: #ffffff;
+            --field: #f5f5f7;
+            --hover: #e8e8ed;
+            --line: #e5e5ea;
+            --ink: #1d1d1f;
+            --muted: #6e6e73;
+            --accent: #0066cc;
+            --accent-fill: #ebf4ff;
+            --action: #f8b62b;
+            --action-hover: #ecaa20;
+            --action-ink: #2a1c04;
+            --success: #237242;
+            --success-fill: #eaf7ee;
+            --error: #b4232b;
+            --code-bg: #f8fafc;
+            --code-border: #dbe4f0;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --canvas: #1c1c1e;
+                --panel: #2c2c2e;
+                --field: #353537;
+                --hover: #414144;
+                --line: #3a3a3c;
+                --ink: #f5f5f7;
+                --muted: #b2b2b7;
+                --accent: #75baff;
+                --accent-fill: #26384d;
+                --action: #ffc451;
+                --action-hover: #ffcf71;
+                --success: #8cd5a3;
+                --success-fill: #263e30;
+                --error: #ff9599;
+                --code-bg: #1a202c;
+                --code-border: #435066;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: var(--canvas);
+            color: var(--ink);
+            font: 14px/1.55 Inter, Avenir, "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        .topbar {
+            border-bottom: 1px solid var(--line);
+            background: var(--canvas);
+        }
+
+        .shell {
+            width: min(1120px, calc(100% - 48px));
+            margin-inline: auto;
+        }
+
+        .topbar .shell, .panel-header, .form-actions, .result-heading, .raw-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .topbar .shell { min-height: 60px; flex-wrap: wrap; padding-block: 8px; }
+        .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+        .brand img { border-radius: 7px; flex: none; }
+        .brand h1 { margin: 0; font-size: 17px; font-weight: 650; }
+        .service-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: var(--panel);
+            color: var(--muted);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .service-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+        .service-status[data-state="ready"] { color: var(--success); background: var(--success-fill); }
+        .service-status[data-state="error"] { color: var(--error); }
+
+        main { padding: 20px 0 36px; }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        .panel {
+            min-width: 0;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .panel-header { min-height: 50px; border-bottom: 1px solid var(--line); padding: 10px 18px; }
+        .panel-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
+
+        .panel-body { padding: 18px; }
+        form { display: grid; gap: 16px; }
+        label { display: block; margin-bottom: 6px; font-weight: 550; font-size: 14px; }
+        .optional { margin-left: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
+        textarea, input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: var(--field);
+            color: var(--ink);
+            font: inherit;
+        }
+        textarea { display: block; resize: vertical; }
+        textarea::placeholder, input::placeholder { color: var(--muted); }
+        textarea:focus, input:focus { border-color: var(--accent); outline: none; }
+        button:focus-visible, summary:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        .status-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+
+        button {
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 6px 13px;
+            background: var(--field);
+            color: var(--ink);
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        button:disabled { opacity: .55; cursor: default; }
+        .primary { padding: 8px 16px; background: var(--action); color: var(--action-ink); border-radius: 999px; font-weight: 650; }
+        .correction { color: var(--accent); background: var(--accent-fill); }
+        @media (hover: hover) {
+            button:not(.process-step-button, .multi-model-tab):hover:not(:disabled) { background: var(--hover); }
+            button.primary:hover:not(:disabled) { background: var(--action-hover); }
+            button.correction:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+        }
+
+        .result-panel { min-height: 360px; }
+        .result { min-width: 0; }
+        .result[data-state="idle"] {
+            min-height: 270px;
+            display: grid;
+            place-content: center;
+            text-align: center;
+        }
+        .result h3 { margin: 0; font-size: 16px; }
+        .result p { overflow-wrap: anywhere; }
+        .result-heading, .form-actions { flex-wrap: wrap; }
+        .result-heading { align-items: baseline; }
+        .result-meta { color: var(--muted); font-size: 12px; }
+        .result[data-state="error"] h3, .correction-error { color: var(--error); }
+        .result[data-state="success"] h3, .correction-done { color: var(--success); }
+
+        .response-details { display: grid; gap: 16px; margin: 16px 0 0; }
+        .response-details dt { color: var(--muted); font-size: 13px; }
+        .response-details dd { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .response-answer { padding: 12px 14px; border-radius: 8px; background: var(--field); }
+        .response-answer dd { font-weight: 600; }
+        #correctionStatus { margin: 0; font-size: 12px; }
+
+        .query-process-header { container-type: inline-size; }
+        .query-process-header:has(.process-stepper:not([hidden])) { padding: 12px clamp(8px, 3%, 20px); }
+        .query-process-header .process-stepper { align-self: stretch; }
+        .query-panels { padding: 24px; }
+        .query-panels .response-result .result-heading { margin-bottom: 10px; }
+        .query-panels .response-details { margin-top: 4px; }
+        .query-panels .response-answer { padding: 0; background: none; }
+        .query-panels .raw-heading { margin: 0; }
+        .query-panel-model-text {
+            margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        .query-panel-reasoning { margin: 0 0 10px; }
+        .query-panel-reasoning p { margin-top: 7px; color: var(--text-secondary); }
+        .query-panels :is(.multi-model-tab, .search-result-title):focus-visible {
+            outline: 2px solid var(--color-primary);
+            outline-offset: 2px;
+        }
+        .query-panels .model-response-card + .model-response-card { margin-top: 12px; }
+        .query-panels .raw-response {
+            border: 0;
+            border-radius: 10px;
+            background: var(--bg-primary);
+        }
+        @media (max-width: 480px) {
+            .query-panels { padding: 16px; }
+        }
+
+        summary { width: fit-content; color: var(--muted); font-size: 13px; cursor: pointer; }
+        .raw-heading { margin: 10px 0 8px; flex-wrap: wrap; }
+        .raw-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .raw-actions button { padding: 4px 8px; }
+        .raw-response {
+            --json-key: #7141a0;
+            --json-string: #27613b;
+            --json-number: #245b9b;
+            --json-literal: #97501c;
+            max-height: 20rem;
+            margin: 0;
+            overflow: auto;
+            padding: 12px;
+            border: 1px solid var(--code-border);
+            border-radius: 8px;
+            background: var(--code-bg);
+            font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        .json-key { color: var(--json-key); }
+        .json-string { color: var(--json-string); }
+        .json-number { color: var(--json-number); }
+        .json-literal { color: var(--json-literal); }
+        .json-punctuation { color: var(--muted); }
+        .raw-response .json-fold-toggle {
+            margin-inline: 4px;
+            padding: 0 5px;
+            border-radius: 4px;
+            background: var(--accent-fill);
+            color: var(--accent);
+            font: inherit;
+            font-size: 11px;
+            white-space: nowrap;
+            user-select: none;
+        }
+        @media (prefers-color-scheme: dark) {
+            .raw-response {
+                --json-key: #d0adfb;
+                --json-string: #a1d7a8;
+                --json-number: #a5cbfc;
+                --json-literal: #f0b888;
+            }
+        }
+        [hidden] { display: none !important; }
+
+        @media (max-width: 750px) {
+            .workspace { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+            .result-panel { min-height: 0; }
+            .result[data-state="idle"] { min-height: 144px; }
+        }
+        @media (max-width: 480px) {
+            .shell { width: calc(100% - 28px); }
+            .panel-header { padding-inline: 16px; }
+            .panel-body { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="shell">
+            <div class="brand">
+                <img src="/app-icon.png" width="26" height="26" alt="ZError">
+                <h1>本地题库查询</h1>
+            </div>
+            <span class="service-status" id="serviceStatus" role="status">正在检查服务</span>
+        </div>
+    </header>
+
+    <main class="shell">
+        <div class="workspace">
+            <section class="panel" aria-labelledby="query-heading">
+                <div class="panel-header">
+                    <h2 id="query-heading">查询条件</h2>
+                </div>
+                <div class="panel-body">
+                    <form id="queryForm">
+                        <div>
+                            <label for="title">题干</label>
+                            <textarea id="title" name="title" rows="3" placeholder="粘贴题目原文" required></textarea>
+                        </div>
+                        <div>
+                            <label for="options">选项<span class="optional">选填</span></label>
+                            <textarea id="options" name="options" rows="4" placeholder="A. 选项一&#10;B. 选项二"></textarea>
+                        </div>
+                        <div>
+                            <label for="type">题型<span class="optional">选填</span></label>
+                            <input id="type" name="type" list="questionTypes" placeholder="选择或输入题型" autocomplete="off">
+                            <datalist id="questionTypes">
+                                <option value="single">单选</option>
+                                <option value="multiple">多选</option>
+                                <option value="judgement">判断</option>
+                                <option value="completion">填空</option>
+                            </datalist>
+                        </div>
+                        <div class="form-actions">
+                            <button id="exampleButton" type="button">填入示例</button>
+                            <button id="submitButton" class="primary" type="submit">查询答案</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <section class="panel result-panel" aria-label="查询结果">
+                <div class="panel-header query-process-header">
+                    <h2 id="result-heading">查询结果</h2>
+                    <ol id="querySteps" class="process-stepper" aria-label="请求处理过程" hidden></ol>
+                </div>
+                <div class="query-panels">
+                    <div class="result" id="idleResult" data-state="idle">
+                        <div>
+                            <h3>等待查询</h3>
+                            <p class="status-note">提交题干后，答案会显示在这里。</p>
+                        </div>
+                    </div>
+                    <div id="queryStepDetail" hidden></div>
+                    <div id="queryReturn" class="exchange-details" hidden>
+                        <section class="exchange-section">
+                            <h3 class="exchange-title">返回结果</h3>
+                            <div class="exchange-overview">
+                                <dl id="responseMeta" class="exchange-meta"></dl>
+                                <div class="result response-result" id="result" data-state="loading">
+                                    <div>
+                                        <div class="result-heading">
+                                            <h3 id="resultTitle" aria-live="polite">等待查询</h3>
+                                            <span class="result-meta" id="resultSource" hidden></span>
+                                        </div>
+                                        <p class="status-note" id="resultNote"></p>
+                                    </div>
+                                    <dl class="response-details" id="responseDetails" hidden>
+                                        <div><dt>匹配题干</dt><dd id="matchedQuestion"></dd></div>
+                                        <div class="response-answer"><dt>答案</dt><dd id="matchedAnswer"></dd></div>
+                                    </dl>
+                                </div>
+                            </div>
+                        </section>
+                        <section id="rawDetails" class="exchange-section" hidden>
+                            <div class="raw-heading">
+                                <h3 class="exchange-title">响应体</h3>
+                                <div class="raw-actions">
+                                    <button id="correctionButton" class="correction" type="button" aria-describedby="correctionStatus" hidden>标记为待修正</button>
+                                    <button id="copyRaw" type="button">复制完整响应</button>
+                                </div>
+                            </div>
+                            <p id="correctionStatus" class="status-note" role="status" hidden></p>
+                            <pre class="raw-response" id="rawResponse" tabindex="0" aria-label="响应内容"><code id="rawCode"></code></pre>
+                        </section>
+                        <section id="responseHeaders" class="exchange-section" hidden></section>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script type="module">
+        import { renderStageDetail, renderMetadata, renderHeaders, highlightJson } from '/query-details/view.js';
+
+        const prefersDark = matchMedia('(prefers-color-scheme: dark)');
+        const updateTheme = () => { document.documentElement.dataset.theme = prefersDark.matches ? 'dark' : 'light'; };
+        prefersDark.addEventListener('change', updateTheme);
+        updateTheme();
+
+        const byId = (id) => document.getElementById(id);
+        const form = byId('queryForm');
+        const title = byId('title');
+        const options = byId('options');
+        const type = byId('type');
+        const serviceStatus = byId('serviceStatus');
+        const result = byId('result');
+        const correction = byId('correctionButton');
+        const correctionStatus = byId('correctionStatus');
+        const notSavedMessages = new Map([
+            ['empty_answer', '模型没有返回答案，此题未入库。'],
+            ['auto_save_disabled', '「AI回答添加到本地题库」已关闭，此题未入库。'],
+            ['write_failed', '写入本地题库失败，此题暂时无法标记。'],
+        ]);
+        const rawCode = byId('rawCode');
+        let rawText = '';
+        const steps = byId('querySteps');
+        const stepDetail = byId('queryStepDetail');
+        const stageTitles = {
+            receive: '接收',
+            local: '本地搜索',
+            search: '联网搜索',
+            model: 'AI 处理',
+            summary: '总结',
+            return: '返回',
+        };
+        const stageStates = {
+            idle: ['idle', '暂无记录'],
+            running: ['running', '进行中'],
+            done: ['completed', '已完成'],
+            failed: ['failed', '失败'],
+            skipped: ['skipped', '已跳过'],
+            no_result: ['no-result', '无结果'],
+        };
+        const stageIcon = (path) => '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="' + path + '"/></svg>';
+        const stages = new Map();
+        let activeStage;
+        let followProgress = true;
+        let verifyDetail;
+        let requestInfo;
+        let responseData;
+        let latestResult;
+
+        function renderActiveStage() {
+            if (!activeStage) return;
+            const stage = stages.get(activeStage);
+            if (activeStage === 'return') {
+                const metrics = stage.data;
+                renderMetadata(byId('responseMeta'), [
+                    ['状态码', metrics?.status ?? requestInfo.httpStatus ?? '—'],
+                    ['响应时间', requestInfo.duration == null ? '—' : (metrics?.response_time ?? requestInfo.duration) + ' ms'],
+                ]);
+            } else {
+                const returnedAnswer = latestResult?.answer || responseData?.message;
+                const fallbackModel = (stage.state === 'done' || stage.state === 'failed') && returnedAnswer
+                    ? { modelName: 'AI 模型响应', response: returnedAnswer, failed: stage.state === 'failed' }
+                    : undefined;
+                renderStageDetail(stepDetail, activeStage, stage, requestInfo, verifyDetail, fallbackModel);
+            }
+        }
+
+        function selectStage(step) {
+            if (activeStage) stages.get(activeStage).button.setAttribute('aria-pressed', 'false');
+            activeStage = step;
+            stages.get(step).button.setAttribute('aria-pressed', 'true');
+            stepDetail.hidden = step === 'return';
+            byId('queryReturn').hidden = step !== 'return';
+            renderActiveStage();
+        }
+
+        function showStep({ step, state, detail }, follow = true) {
+            if (step === 'verify') {
+                verifyDetail = detail;
+                if (followProgress && follow) selectStage('local');
+                else if (activeStage === 'local') renderActiveStage();
+                return;
+            }
+            const stage = stages.get(step);
+            if (!stage || !Object.hasOwn(stageStates, state)) return;
+            stage.state = state;
+            stage.detail = detail;
+            const [className, status] = stageStates[state];
+            stage.row.className = className;
+            const label = stageTitles[step];
+            stage.button.setAttribute('aria-label', label + '，' + status);
+            stage.button.title = label + ' · ' + status;
+            if (state === 'done' || state === 'skipped' || state === 'no_result') {
+                stage.indicator.innerHTML = stageIcon(state === 'done' ? 'm5 12 4 4L19 6' : 'M6 12h12');
+            } else {
+                stage.indicator.textContent = state === 'failed' ? '!' : stage.index;
+            }
+            if (step === activeStage) renderActiveStage();
+            else if (follow && followProgress) selectStage(step);
+        }
+
+        function showDetails({ step, data }) {
+            const stage = stages.get(step);
+            if (!stage) return;
+            stage.data = data;
+            if (activeStage === step) renderActiveStage();
+        }
+
+        function resetSteps() {
+            steps.replaceChildren();
+            stages.clear();
+            activeStage = undefined;
+            verifyDetail = undefined;
+            followProgress = true;
+            for (const [index, [step, label]] of Object.entries(stageTitles).entries()) {
+                const row = document.createElement('li');
+                row.dataset.step = step;
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'process-step-button';
+                button.setAttribute('aria-controls', step === 'return' ? 'queryReturn' : stepDetail.id);
+                button.setAttribute('aria-pressed', 'false');
+                button.addEventListener('click', () => {
+                    followProgress = false;
+                    selectStage(step);
+                });
+                const indicator = document.createElement('span');
+                indicator.className = 'process-step-indicator';
+                indicator.setAttribute('aria-hidden', 'true');
+                const name = document.createElement('span');
+                name.textContent = label;
+                button.append(indicator, name);
+                row.append(button);
+                steps.append(row);
+                stages.set(step, { row, button, indicator, index: index + 1 });
+                showStep({ step, state: 'idle', detail: '尚未开始' }, false);
+            }
+            showStep({ step: 'receive', state: 'running', detail: '正在提交查询' });
+        }
+
+        function finishSteps(state, detail, receivedFinalProgress) {
+            for (const [step, stage] of stages) {
+                if (step === 'return') continue;
+                if (stage.state === 'running') {
+                    showStep({ step, state: 'failed', detail: '处理未完成' }, false);
+                } else if (stage.state === 'idle') {
+                    const skipped = receivedFinalProgress && step !== 'local';
+                    showStep({
+                        step,
+                        state: skipped ? 'skipped' : 'idle',
+                        detail: skipped ? '本次查询未执行此步骤' : '没有收到这一步的处理记录',
+                    }, false);
+                }
+            }
+            showStep({ step: 'return', state, detail });
+        }
+
+        async function readQueryResponse(response) {
+            if (!response.headers.get('content-type')?.startsWith('text/event-stream')) {
+                return response.text();
+            }
+            if (!response.body) throw new Error('浏览器未收到查询进度。');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let end;
+                    while ((end = buffer.indexOf('\n\n')) !== -1) {
+                        const frame = buffer.slice(0, end);
+                        buffer = buffer.slice(end + 2);
+                        const lines = frame.split('\n');
+                        const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim();
+                        const data = lines.filter((line) => line.startsWith('data:'))
+                            .map((line) => line.slice(5).replace(/^ /, '')).join('\n');
+                        if (event === 'progress' && data) showStep(JSON.parse(data));
+                        if (event === 'details' && data) showDetails(JSON.parse(data));
+                        if (event === 'result' && data) return data;
+                    }
+                }
+                throw new Error('查询连接中断，未收到结果。');
+            } finally {
+                void reader.cancel().catch(() => {});
+                reader.releaseLock();
+            }
+        }
+
+        function updateService(ready) {
+            serviceStatus.dataset.state = ready ? 'ready' : 'error';
+            serviceStatus.textContent = ready ? '本地服务运行中' : '本地服务不可用';
+        }
+
+        async function checkService() {
+            const ready = await fetch('/api/status', { cache: 'no-store' })
+                .then((response) => response.ok, () => false);
+            updateService(ready);
+        }
+
+        function showResult(state, heading, note = '') {
+            result.dataset.state = state;
+            byId('resultTitle').textContent = heading;
+            byId('resultNote').textContent = note;
+            byId('resultNote').hidden = !note;
+            byId('resultSource').hidden = state !== 'success';
+            byId('responseDetails').hidden = state !== 'success';
+            correction.hidden = true;
+            correctionStatus.hidden = true;
+        }
+
+        function showCorrection(data) {
+            const marked = Boolean(data.is_pending_correction);
+            const canMark = Boolean(data.correction_path) && !marked;
+            correction.hidden = marked;
+            correction.disabled = !canMark;
+            correction.textContent = '标记为待修正';
+            correctionStatus.hidden = canMark;
+            correctionStatus.className = marked ? 'status-note correction-done' : 'status-note';
+            correctionStatus.textContent = marked ? '已标记待修正'
+                : canMark ? ''
+                : data.id > 0 ? '本次响应缺少标记链接，请重新查询。'
+                : notSavedMessages.get(data.not_saved_reason) ?? '此题尚未保存到本地题库，暂时无法标记。';
+        }
+
+        byId('exampleButton').addEventListener('click', () => {
+            title.value = '下列哪个是中国的首都？';
+            options.value = 'A. 上海\nB. 北京\nC. 广州\nD. 杭州';
+            type.value = 'single';
+            title.focus();
+        });
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const question = title.value.trim();
+            if (!question) { title.focus(); return; }
+            const submit = byId('submitButton');
+            if (submit.disabled) return;
+            submit.disabled = true;
+            submit.textContent = '查询中…';
+            latestResult = null;
+            responseData = null;
+            rawText = '';
+            requestInfo = {
+                url: new URL('/query', location.href).href,
+                startedAt: Date.now(),
+                headers: new Headers({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
+                body: JSON.stringify({
+                    title: question,
+                    options: options.value.trim() || null,
+                    type: type.value.trim() || null,
+                }),
+            };
+            const started = performance.now();
+            byId('rawDetails').hidden = true;
+            byId('responseHeaders').hidden = true;
+            byId('copyRaw').textContent = '复制完整响应';
+            resetSteps();
+            steps.hidden = false;
+            byId('idleResult').hidden = true;
+            byId('result-heading').hidden = true;
+            showResult('loading', '正在查询');
+
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: requestInfo.headers,
+                    body: requestInfo.body,
+                });
+                updateService(true);
+                requestInfo.httpStatus = response.status;
+                const responseHeaders = byId('responseHeaders');
+                renderHeaders(responseHeaders, '响应头', response.headers);
+                responseHeaders.hidden = false;
+                const hasProgress = response.headers.get('content-type')?.startsWith('text/event-stream') ?? false;
+                if (response.ok || hasProgress) {
+                    showStep({ step: 'receive', state: 'done', detail: '服务已接收查询请求' });
+                }
+                rawText = await readQueryResponse(response);
+                byId('rawDetails').hidden = false;
+                highlightJson(rawCode, rawText);
+                const data = responseData = JSON.parse(rawText);
+                requestInfo.duration = Math.round(performance.now() - started);
+                if (!response.ok) throw new Error(data.message || 'HTTP ' + response.status);
+                if (data.code === 1 && data.data) {
+                    latestResult = data.data;
+                    showResult('success', '查询成功');
+                    byId('resultSource').textContent = latestResult.is_ai ? 'AI 生成' : '本地题库';
+                    byId('matchedQuestion').textContent = latestResult.question_text || question;
+                    byId('matchedAnswer').textContent = latestResult.answer || '—';
+                    showCorrection(latestResult);
+                    finishSteps('done', '已返回答案', hasProgress);
+                } else if (data.code === 0 && (!data.message || data.message === 'No matching records found')) {
+                    finishSteps('done', '未找到匹配题目', hasProgress);
+                    showResult('empty', '未找到匹配题目', '可以检查题干、选项和题型后再试。');
+                } else {
+                    finishSteps('failed', '查询未完成', hasProgress);
+                    showResult('error', '查询未完成', data.message || '服务返回了无法识别的结果。');
+                }
+            } catch (error) {
+                requestInfo.duration = Math.round(performance.now() - started);
+                finishSteps('failed', '请求未完成', false);
+                if (byId('rawDetails').hidden) void checkService();
+                showResult('error', '请求失败', error.message || '请检查本地题库服务后重试。');
+            } finally {
+                submit.disabled = false;
+                submit.textContent = '查询答案';
+            }
+        });
+
+        correction.addEventListener('click', async () => {
+            const data = latestResult;
+            if (!data?.correction_path || correction.disabled) return;
+            correction.disabled = true;
+            correction.textContent = '标记中…';
+            correctionStatus.textContent = '';
+            try {
+                const url = new URL(data.correction_path, location.origin);
+                if (url.origin !== location.origin) throw new Error('待修正链接无效');
+                const response = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
+                const receipt = await response.json();
+                if (!response.ok || !receipt.success || receipt.id !== data.id) {
+                    throw new Error(receipt.message || '标记失败，请重试');
+                }
+                data.is_pending_correction = true;
+                if (latestResult === data) showCorrection(data);
+            } catch (error) {
+                if (latestResult === data) {
+                    showCorrection(data);
+                    correctionStatus.hidden = false;
+                    correctionStatus.className = 'status-note correction-error';
+                    correctionStatus.textContent = error.message || '标记失败，请重试';
+                }
+            }
+        });
+
+        byId('copyRaw').addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            const copiedResponse = rawText;
+            try {
+                await navigator.clipboard.writeText(copiedResponse);
+                if (rawText === copiedResponse) button.textContent = '已复制';
+            } catch {
+                if (rawText !== copiedResponse) return;
+                rawCode.textContent = copiedResponse;
+                byId('rawResponse').focus();
+                const selection = window.getSelection();
+                if (selection) {
+                    const range = document.createRange();
+                    range.selectNodeContents(rawCode);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+                button.textContent = '请手动复制';
+            }
+        });
+
+        void checkService();
+    </script>
+</body>
+</html>

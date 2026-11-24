@@ -1,0 +1,530 @@
+<template>
+  <div class="model-settings-container">
+    <!-- 左侧平台列表 -->
+    <div class="platform-sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title-row">
+          <h3 class="sidebar-title">AI 平台管理</h3>
+          <button class="icon-action-btn icon-action-btn--ghost icon-action-btn--sm" @click="openModelConfigDocs" title="查看模型配置文档">
+            <svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+              <path d="M463.99957 784.352211c0 26.509985 21.490445 48.00043 48.00043 48.00043s48.00043-21.490445 48.00043-48.00043c0-26.509985-21.490445-48.00043-48.00043-48.00043S463.99957 757.842226 463.99957 784.352211z" fill="currentColor"></path>
+              <path d="M512 960c-247.039484 0-448-200.960516-448-448S264.960516 64 512 64 960 264.960516 960 512 759.039484 960 512 960zM512 128.287273c-211.584464 0-383.712727 172.128262-383.712727 383.712727 0 211.551781 172.128262 383.712727 383.712727 383.712727 211.551781 0 383.712727-172.159226 383.712727-383.712727C895.712727 300.415536 723.551781 128.287273 512 128.287273z" fill="currentColor"></path>
+              <path d="M512 673.695256c-17.664722 0-32.00086-14.336138-32.00086-31.99914l0-54.112297c0-52.352533 39.999785-92.352318 75.32751-127.647359 25.887273-25.919957 52.67249-52.67249 52.67249-74.016718 0-53.343368-43.07206-96.735385-95.99914-96.735385-53.823303 0-95.99914 41.535923-95.99914 94.559333 0 17.664722-14.336138 31.99914-32.00086 31.99914s-32.00086-14.336138-32.00086-31.99914c0-87.423948 71.775299-158.559333 160.00086-158.559333s160.00086 72.095256 160.00086 160.735385c0 47.904099-36.32028 84.191695-71.424378 119.295794-27.839699 27.776052-56.575622 56.511974-56.575622 82.3356l0 54.112297C544.00086 659.328155 529.664722 673.695256 512 673.695256z" fill="currentColor"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="header-actions">
+          <button class="icon-action-btn icon-action-btn--add icon-action-btn--sm" @click="showAddPlatformDialog = true" title="添加平台">
+            <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+              <path d="M544.256 480.256h307.2a32.256 32.256 0 0 1 0 64h-307.2v307.2a32.256 32.256 0 0 1-64 0v-307.2h-307.2a32.256 32.256 0 1 1 0-64h307.2v-307.2a32.256 32.256 0 1 1 64 0z" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <div class="platform-list-scroll-wrap" ref="platformListScrollWrap">
+        <div class="platform-list-scroll" ref="platformListScroll" @scroll="onPlatformListScroll">
+          <TransitionGroup tag="div" name="platform-list" class="platform-list">
+            <div 
+              v-for="platform in orderedPlatforms"
+              :key="platform.id"
+              class="platform-item"
+              :class="{ active: selectedPlatform?.id === platform.id, 'platform-item--disabled': platform.enabled === false }"
+              @click="selectPlatform(platform)"
+              @contextmenu="showPlatformMenu($event, platform)"
+            >
+              <div class="platform-icon">
+                <div class="platform-icon-inner" :class="{ 'platform-icon-inner--with-bg': shouldUsePlatformIconBackground(platform) }">
+                  <!-- 如果是emoji，直接显示 -->
+                  <div
+                    v-if="platform.icon && isEmoji(platform.icon)"
+                    class="icon-emoji"
+                  >
+                    {{ platform.icon }}
+                  </div>
+                  <!-- 如果是图片URL，使用img标签 -->
+                  <img
+                    v-else-if="platform.icon && !isEmoji(platform.icon) && !iconLoadErrors[platform.id]"
+                    :src="platformIconUrls[platform.id]"
+                    :alt="platform.displayName"
+                    @load="handlePlatformIconLoad(platform, $event)"
+                    @error="handleIconError(platform.id)"
+                    class="icon-image"
+                  />
+                  <!-- 否则显示文字回退 -->
+                  <div
+                    v-else
+                    class="icon-fallback"
+                  >
+                    {{ getPlatformInitials(platform.displayName) }}
+                  </div>
+                </div>
+                <!-- 选中模型数量 badge -->
+                <span
+                  v-if="getPlatformSelectedCount(platform) > 0 && selectedCategory === 'answer'"
+                  class="platform-selected-badge platform-selected-badge--count"
+                >{{ getPlatformSelectedCount(platform) }}</span>
+                <span
+                  v-else-if="getPlatformSelectedCount(platform) > 0"
+                  class="platform-selected-badge"
+                ></span>
+              </div>
+              <div class="platform-info">
+                <h4 class="platform-name">{{ platform.displayName }}</h4>
+              </div>
+              <!-- 启用开关已移至详情面板 -->
+            </div>
+          </TransitionGroup>
+        </div>
+        <div class="custom-scrollbar" :class="{ 'is-visible': platformScrollbarVisible }" ref="platformScrollbar" @mousedown="onPlatformScrollbarMousedown">
+          <div 
+            class="custom-scrollbar-thumb"
+            ref="platformScrollbarThumb"
+          ></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧平台详情 -->
+    <div class="platform-detail">
+      <div v-if="selectedPlatform" class="detail-scroll-wrap" ref="detailScrollWrap">
+        <div class="detail-content" ref="detailContent" @scroll="onDetailScroll">
+        <!-- 平台基本信息 -->
+        <div class="detail-section platform-overview">
+          <div class="section-header">
+            <div class="platform-title-row">
+              <h4 class="subsection-title">{{ selectedPlatform.displayName }}</h4>
+              <button
+                v-if="selectedPlatform.url"
+                class="platform-link-btn"
+                @click="openPlatformUrl(selectedPlatform.url)"
+                title="打开平台官网"
+              >
+                <svg t="1745846730970" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="11" height="11">
+                  <path d="M359.86136 0.00382a51.199909 51.199909 0 0 1 0 102.399818H153.599727a51.199909 51.199909 0 0 0-51.199909 51.199909V870.400273a51.199909 51.199909 0 0 0 51.199909 51.199909h716.796726a51.199909 51.199909 0 0 0 51.199909-51.199909V665.600637a51.199909 51.199909 0 0 1 102.399818 0v204.799636a153.599727 153.599727 0 0 1-153.599727 153.599727H153.599727A153.599727 153.599727 0 0 1 0 870.400273V153.603547A153.599727 153.599727 0 0 1 153.599727 0.00382h206.261633z m620.980897 0.584999h2.193996a29.256948 29.256948 0 0 1 5.119991 1.243998h0.730998a24.209957 24.209957 0 0 1 5.85199 2.559995 56.2469 56.2469 0 0 1 5.85099 3.071995l2.193996 1.315997a27.793951 27.793951 0 0 1 5.851989 5.412991l-0.731998-1.243998 0.731998 0.731999v0.511999l4.387993 4.168992 1.462997 2.193996a84.113851 84.113851 0 0 1 7.314987 13.969976v0.512999c0.730999 2.193996 0.730999 4.460992 1.461997 6.728988v2.119996a25.892954 25.892954 0 0 1 0.731999 7.314987v332.799408a51.199909 51.199909 0 0 1-102.399818 0V174.813509l-373.759336 373.393337a51.199909 51.199909 0 0 1-70.215875 1.900996l-2.193996-1.900996a52.149907 52.149907 0 0 1 0-72.411872l373.758336-373.392336H639.997863a51.199909 51.199909 0 0 1-51.199909-48.639914v-2.559995a51.199909 51.199909 0 0 1 51.199909-51.199909h332.798408a41.105927 41.105927 0 0 1 7.313987 0.584999h0.731999z m0 0" fill="currentColor"/>
+                </svg>
+              </button>
+              <OlTip
+                v-if="platformHasInvite(selectedPlatform)"
+                :text="inviteField(selectedPlatform.inviteCode) ? '复制并跳转' : ''"
+              >
+                <button
+                  class="platform-link-btn platform-invite-btn"
+                  @click="handleInviteButtonClick(selectedPlatform)"
+                  :aria-label="inviteField(selectedPlatform.inviteCode) ? '复制并跳转' : (inviteField(selectedPlatform.inviteText) || '邀请链接')"
+                >
+                  <span class="invite-gift-wrap">
+                    <!-- 盒身（下半部分） -->
+                    <svg class="invite-gift-icon gift-body" t="1774416753013" viewBox="0 0 1132 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+                      <path d="M142.335165 475.823312h848.049308c6.557851 0 11.923365 5.365514 11.923365 11.923365V1012.076635c0 6.557851-5.365514 11.923365-11.923365 11.923365h-848.049308c-6.557851 0-11.923365-5.365514-11.923365-11.923365V487.746677c0-6.557851 5.365514-11.923365 11.923365-11.923365z" fill="#FF6174"/>
+                      <path d="M491.83879 479.99649h149.042058v544.00351H491.83879z" fill="#FFB82C"/>
+                      <path d="M491.83879 141.521977h149.042058V1024H491.83879z" fill="#FFCA3E"/>
+                    </svg>
+                    <!-- 盖子（上半部分） -->
+                    <svg class="invite-gift-icon gift-lid" t="1774416753013" viewBox="0 0 1132 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+                      <path d="M17.885047 226.624992h1096.949544c9.836776 0 17.885047 8.048271 17.885047 17.885047v213.428226c0 9.836776-8.048271 17.885047-17.885047 17.885047H17.885047c-9.836776 0-17.885047-8.048271-17.885047-17.885047V244.510039c0-9.836776 8.048271-17.885047 17.885047-17.885047z" fill="#FF505D"/>
+                      <path d="M258.438928 160.59936S128.474254 135.560294 102.540936 126.617771l45.904953 66.025631L65.578505 225.581697s193.903717 35.919136 402.860682 4.918388L367.835798 184.893215l-109.39687-24.293855zM351.888298 3.359989c-66.025632-11.774323-97.473506 11.178154-97.473506 11.178155l-18.034089 114.017174s46.650164-31.745958 101.944768-18.034089c71.987314 18.034089 162.008717 119.978856 162.008717 119.978856v-77.948996S441.313533 19.307489 351.888298 3.359989zM989.639263 192.643402l46.053996-66.025631c-25.933318 8.942523-155.897992 33.981589-155.897993 33.981589L770.398396 184.893215l-100.603389 45.755912c208.956965 31.000748 402.860682-5.06743 402.860682-5.06743L989.639263 192.643402zM901.704449 128.555318L883.819402 14.687186s-31.447874-22.952477-97.473506-11.178155C696.920662 19.456531 637.900007 152.700131 637.900007 152.700131v77.948996s89.872361-101.944767 161.859674-119.978856c55.145561-13.860911 101.944767 17.885047 101.944768 17.885047z" fill="#FFCA3E"/>
+                      <path d="M387.211266 127.959149c-64.982337-37.558599-142.186123-24.890024-150.681521 0.745211-9.38965 28.168949 36.664346 58.126402 103.286146 93.002244 43.818365 22.952477 160.667338 8.942523 160.667339 8.942523s-48.289627-65.280421-113.271964-102.689978zM901.704449 128.555318c-8.495397-25.635234-85.699183-38.303809-150.681521-0.745211s-113.271964 102.689978-113.271963 102.689978 116.998015 14.009953 160.667338-8.942523c66.6218-34.726799 112.675796-64.833295 103.286146-93.002244z" fill="#FFB82C"/>
+                    </svg>
+                  </span>
+                  <span v-if="inviteField(selectedPlatform.inviteText)" class="invite-text">{{ selectedPlatform.inviteText }}</span>
+                </button>
+              </OlTip>
+            </div>
+            <Toggle
+              v-model="selectedPlatform.enabled"
+              variant="platform"
+              size="medium"
+              @change="updatePlatformEnabled"
+            />
+          </div>
+        </div>
+
+        <!-- API Key 配置 -->
+        <div class="detail-section">
+          <h4 class="subsection-title">API 配置</h4>
+          <div class="form-group">
+            <div class="form-label-row">
+              <label class="form-label">API Key</label>
+              <a
+                href="https://docs.zerrorai.com/get-apiKey"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="api-doc-link"
+              >
+                如何获取Api Key?
+              </a>
+            </div>
+            <div class="input-group">
+              <SecureSecretInput :key="selectedPlatform.id" :model-value="modelConfigManager.getPlatformApiKey(selectedPlatform)" class="model-secret-input" kind="api" label="API Key" input-class="api-key-input" placeholder="请输入 API Key" @update:model-value="updatePlatformApiKey" />
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label-row">
+              <label class="form-label">Base URL</label>
+              <button
+                v-if="selectedPlatform.remoteBaseUrl !== undefined && (selectedPlatform.baseUrlOverride !== undefined || selectedPlatform.apiProtocolOverride)"
+                type="button"
+                class="connection-reset"
+                title="恢复默认 Base URL 和协议"
+                @click="restorePlatformConnection"
+              >
+                恢复默认
+              </button>
+            </div>
+            <div class="base-url-row">
+              <input
+                type="text"
+                v-model="selectedPlatform.baseUrl"
+                @input="updatePlatformBaseUrl"
+                class="form-input"
+                placeholder="API 基础地址"
+              >
+              <div class="protocol-select-wrap">
+                <button
+                  ref="platformProtocolTriggerRef"
+                  type="button"
+                  class="protocol-select-trigger"
+                  :class="{ open: showPlatformProtocolDropdown }"
+                  title="该平台下所有模型共用此协议"
+                  aria-label="API 协议"
+                  aria-haspopup="listbox"
+                  :aria-expanded="showPlatformProtocolDropdown"
+                  @click="togglePlatformProtocolDropdown"
+                >
+                  <span class="protocol-select-path">{{ currentPlatformProtocolPath }}</span>
+                  <svg class="protocol-select-arrow" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                    <path d="M4.2 6.2a.75.75 0 0 1 1.06 0L8 8.94l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.26a.75.75 0 0 1 0-1.06z" fill="currentColor"/>
+                  </svg>
+                </button>
+                <Teleport to="body">
+                  <Transition name="dropdown-pop">
+                    <div
+                      v-if="showPlatformProtocolDropdown"
+                      ref="platformProtocolDropdownRef"
+                      class="protocol-dropdown settings-popup"
+                      :style="platformProtocolDropdownStyle"
+                      role="listbox"
+                      aria-label="API 协议"
+                    >
+                      <button
+                        v-for="opt in platformProtocolOptions"
+                        :key="opt.value"
+                        type="button"
+                        class="protocol-dropdown-item"
+                        :class="{ active: (selectedPlatform.apiProtocol || 'openai-chat') === opt.value }"
+                        role="option"
+                        :aria-selected="(selectedPlatform.apiProtocol || 'openai-chat') === opt.value"
+                        @click="selectPlatformProtocol(opt.value)"
+                      >
+                        <span class="protocol-dropdown-path">{{ opt.endpoint }}</span>
+                        <span class="protocol-dropdown-label">{{ opt.label }}</span>
+                      </button>
+                    </div>
+                  </Transition>
+                </Teleport>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模型管理 -->
+        <div class="detail-section">
+          <div class="section-header">
+            <h4 class="subsection-title">模型管理</h4>
+            <div class="header-actions">
+              <!-- 模型分类筛选 -->
+              <ModelCategorySwitch v-model="selectedCategory" />
+              <!-- 从供应商 API 拉取模型（百炼原生 capabilities） -->
+              <button
+                class="icon-action-btn icon-action-btn--ghost icon-action-btn--sm"
+                :disabled="!canFetch"
+                :title="fetching ? '正在拉取模型…' : '从供应商 API 拉取模型'"
+                @click="openFetchDialog"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke-linecap="round"/>
+                  <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <!-- 添加模型按钮 -->
+              <button class="icon-action-btn icon-action-btn--add icon-action-btn--model-add" @click="openQuickAdd" title="添加模型">
+                <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+                  <path d="M544.256 480.256h307.2a32.256 32.256 0 0 1 0 64h-307.2v307.2a32.256 32.256 0 0 1-64 0v-307.2h-307.2a32.256 32.256 0 1 1 0-64h307.2v-307.2a32.256 32.256 0 1 1 64 0z" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          
+          <div class="model-list-hint">
+            <template v-if="selectedCategory === 'answer'">已选 {{ currentMultiModels.length }}/{{ MAX_ANSWER_MODELS }} · 图片题使用首个支持视觉的已选模型</template>
+            <template v-else-if="selectedCategory === 'agent'">单选，显示全部模型，再点一次可取消选择</template>
+            <template v-else>单选，再点一次可取消选择</template>
+          </div>
+          <div class="model-list">
+            <div 
+              v-for="model in filteredModels" 
+              :key="model.id"
+              :data-model-id="model.id"
+              class="model-item"
+              :class="{ 
+                active: isCurrentCategoryModelSelected(model),
+                'model-item--disabled': isSelectedPlatformDisabled
+              }"
+              @click="selectModel(model)"
+              @contextmenu.prevent="showModelContextMenuHandler($event, model)"
+            >
+              <div class="model-icon-wrap">
+                <img v-if="getModelIcon(model)" :src="getModelIcon(model)" :alt="model.displayName" class="model-icon-img" />
+                <div v-else class="model-icon-fallback">{{ (model.displayName || model.id).charAt(0).toUpperCase() }}</div>
+              </div>
+              <div class="model-info">
+                <div class="model-header">
+                  <h5 class="model-name">{{ model.displayName }}</h5>
+                  <span v-if="modelHasVision(model)" class="model-kind-tag">视觉</span>
+                </div>
+                
+              </div>
+              <div class="model-actions">
+                <div
+                  class="model-selected"
+                  :class="{ 'model-selected--multi': selectedCategory === 'answer' }"
+                >
+                  <span v-if="isCurrentCategoryModelSelected(model)" class="model-dot"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <!-- 自定义滚动条 -->
+        <div class="custom-scrollbar" :class="{ 'is-visible': scrollbarVisible }" ref="customScrollbar" @mousedown="onScrollbarMousedown">
+          <div class="custom-scrollbar-thumb" ref="customScrollbarThumb"></div>
+        </div>
+      </div>
+
+      <div v-if="!selectedPlatform" class="empty-state">
+        <div class="empty-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h3>选择一个AI平台</h3>
+        <p>从左侧列表中选择一个平台来查看和编辑其配置</p>
+      </div>
+    </div>
+
+
+    <PlatformConfigDialog
+      :show="showAddPlatformDialog || showEditPlatformDialog"
+      :platform="editingPlatform"
+      @close="closePlatformDialog"
+      @save="savePlatform"
+    />
+
+    <!-- 平台右键菜单 -->
+    <PlatformContextMenu
+      :visible="showPlatformContextMenu"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :platform="contextMenuPlatform"
+      @edit-platform="handleEditPlatform"
+      @delete-platform="handleDeletePlatform"
+      @close="hidePlatformMenu"
+    />
+
+    <!-- 模型右键菜单 -->
+    <ModelContextMenu
+      :visible="showModelContextMenu"
+      :x="modelContextMenuX"
+      :y="modelContextMenuY"
+      :model="contextMenuModel"
+      @edit-model="handleEditModel"
+      @test-model="handleTestModel"
+      @delete-model="handleDeleteModel"
+      @close="hideModelMenu"
+    />
+
+    <ModelConfigDialog
+      :show="showModelConfigDialog"
+      :model="editingModel"
+      :platform-base-url="selectedPlatform?.baseUrl"
+      :platform-api-key="selectedPlatform ? modelConfigManager.getPlatformApiKey(selectedPlatform) : undefined"
+      :platform-api-protocol="selectedPlatform?.apiProtocol"
+      @close="closeModelDialog"
+      @after-leave="onModelConfigAfterLeave"
+      @save="saveModel"
+    />
+
+    <!-- 测试弹窗 -->
+    <ModelTestDialog
+      :visible="showTestDialog"
+      :model-name="testDialogModelName"
+      :testing="testingModelId !== null"
+      :test-result="currentTestResult"
+      :test-error="currentTestError"
+      :metrics="testMetrics"
+      :streaming-response="streamingResponse"
+      :streaming-reasoning="streamingReasoning"
+      @close="handleCloseTestDialog"
+    />
+
+
+    <!-- 删除模型确认弹窗 -->
+    <ModelDeleteConfirmDialog
+      :visible="showDeleteModelDialog"
+      :model-name="deleteModelName"
+      @confirm="confirmDeleteModel"
+      @cancel="cancelDeleteModel"
+    />
+
+    <!-- 删除平台确认弹窗 -->
+    <PlatformDeleteConfirmDialog
+      :visible="showDeletePlatformDialog"
+      :platform-name="deletePlatformName"
+      @confirm="confirmDeletePlatform"
+      @cancel="cancelDeletePlatform"
+    />
+
+    <!-- 从 API 拉取模型结果 -->
+    <FetchModelsDialog
+      :visible="dialogVisible"
+      :added="added"
+      :expired="expired"
+      :endpoint="fetchEndpoint"
+      :error="fetchError"
+      @close="closeFetchDialog"
+      @apply="applyFetchResult"
+    />
+  </div>
+
+</template>
+
+<script setup lang="ts">
+import { MAX_ANSWER_MODELS, modelConfigManager } from '../../services/model/config'
+import SecureSecretInput from '../../components/ui/SecureSecretInput.vue'
+import PlatformConfigDialog from './ModelSettings/PlatformConfigDialog.vue'
+import PlatformContextMenu from './ModelSettings/PlatformContextMenu.vue'
+import ModelContextMenu from './ModelSettings/ModelContextMenu.vue'
+import ModelConfigDialog from './ModelSettings/ModelConfigDialog.vue'
+import ModelTestDialog from './ModelSettings/ModelTestDialog.vue'
+import ModelDeleteConfirmDialog from './ModelSettings/ModelDeleteConfirmDialog.vue'
+import PlatformDeleteConfirmDialog from './ModelSettings/PlatformDeleteConfirmDialog.vue'
+import FetchModelsDialog from './ModelSettings/FetchModelsDialog.vue'
+import { useFetchModels } from './ModelSettings/useFetchModels'
+import Toggle from '../../components/ui/Toggle.vue'
+import ModelCategorySwitch from './ModelSettings/ModelCategorySwitch.vue'
+import OlTip from './OlTip.vue'
+import { useModelSettings } from './useModelSettings'
+
+const {
+  detailScrollWrap,
+  detailContent,
+  customScrollbar,
+  customScrollbarThumb,
+  platformListScrollWrap,
+  platformListScroll,
+  platformScrollbar,
+  platformScrollbarThumb,
+  scrollbarVisible,
+  platformScrollbarVisible,
+  onDetailScroll,
+  onScrollbarMousedown,
+  onPlatformListScroll,
+  onPlatformScrollbarMousedown,
+  showAddPlatformDialog,
+  showEditPlatformDialog,
+  editingPlatform,
+  showModelConfigDialog,
+  editingModel,
+  selectedPlatform,
+  currentMultiModels,
+  getPlatformSelectedCount,
+  selectedCategory,
+  isCurrentCategoryModelSelected,
+  filteredModels,
+  isSelectedPlatformDisabled,
+  testingModelId,
+  showTestDialog,
+  testDialogModelName,
+  currentTestResult,
+  currentTestError,
+  testMetrics,
+  streamingResponse,
+  streamingReasoning,
+  showDeleteModelDialog,
+  deleteModelName,
+  showDeletePlatformDialog,
+  deletePlatformName,
+  iconLoadErrors,
+  platformIconUrls,
+  showPlatformContextMenu,
+  contextMenuX,
+  contextMenuY,
+  contextMenuPlatform,
+  showModelContextMenu,
+  modelContextMenuX,
+  modelContextMenuY,
+  contextMenuModel,
+  confirmDeletePlatform,
+  cancelDeletePlatform,
+  closePlatformDialog,
+  savePlatform,
+  selectPlatform,
+  selectModel,
+  getPlatformInitials,
+  isEmoji,
+  shouldUsePlatformIconBackground,
+  handlePlatformIconLoad,
+  handleIconError,
+  getModelIcon,
+  showPlatformMenu,
+  hidePlatformMenu,
+  showModelContextMenuHandler,
+  hideModelMenu,
+  handleEditPlatform,
+  handleDeletePlatform,
+  handleEditModel,
+  handleTestModel,
+  handleDeleteModel,
+  updatePlatformApiKey,
+  updatePlatformEnabled,
+  updatePlatformBaseUrl,
+  platformProtocolOptions,
+  currentPlatformProtocolPath,
+  showPlatformProtocolDropdown,
+  platformProtocolTriggerRef,
+  platformProtocolDropdownRef,
+  platformProtocolDropdownStyle,
+  togglePlatformProtocolDropdown,
+  selectPlatformProtocol,
+  restorePlatformConnection,
+  openQuickAdd,
+  closeModelDialog,
+  onModelConfigAfterLeave,
+  saveModel,
+  confirmDeleteModel,
+  cancelDeleteModel,
+  openModelConfigDocs,
+  openPlatformUrl,
+  inviteField,
+  platformHasInvite,
+  handleInviteButtonClick,
+  handleCloseTestDialog,
+  orderedPlatforms,
+  modelHasVision,
+} = useModelSettings()
+
+// 从供应商 API 拉取模型（百炼原生 capabilities，其它平台回退兼容端点）
+const {
+  dialogVisible, fetching, fetchError, fetchEndpoint,
+  added, expired, canFetch,
+  openFetchDialog, closeFetchDialog, applyFetchResult,
+} = useFetchModels(selectedPlatform)
+
+</script>
+
+<style scoped src="../../styles/icon-action-button.css"></style>
+<style scoped src="./ModelSettings.css"></style>
