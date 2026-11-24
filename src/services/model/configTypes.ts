@@ -4,7 +4,9 @@ import { normalizeApiProtocol } from './protocol'
 export type ApiProtocol = 'openai-chat' | 'openai-response' | 'anthropic' | 'custom'
 export type ModelSelectionCategory = 'answer' | 'summary' | 'agent'
 // 兼容旧版最多 5 个文本模型加 1 个视觉模型。
-export const MAX_ANSWER_MODELS = 6
+// 答题模型可选上限。懒投票场景下模型越多越可能命中一致答案，
+// 但每个模型都是一次真实请求，12 已足够覆盖多供应商交叉验证。
+export const MAX_ANSWER_MODELS = 12
 type BuiltinApiProtocol = Exclude<ApiProtocol, 'custom'>
 
 export const isBuiltinApiProtocol = (protocol: unknown): protocol is BuiltinApiProtocol =>

@@ -235,17 +235,18 @@
             <div class="header-actions">
               <!-- 模型分类筛选 -->
               <ModelCategorySwitch v-model="selectedCategory" />
-              <!-- 从供应商 API 拉取模型（百炼原生 capabilities） -->
+              <!-- 从供应商 API 拉取模型（百炼原生 capabilities，分页拉全） -->
               <button
-                class="icon-action-btn icon-action-btn--ghost icon-action-btn--sm"
+                class="icon-action-btn icon-action-btn--ghost icon-action-btn--sm fetch-models-btn"
                 :disabled="!canFetch"
-                :title="fetching ? '正在拉取模型…' : '从供应商 API 拉取模型'"
+                :title="fetching ? '正在从供应商拉取模型…' : '从供应商 API 拉取全部模型（阿里云百炼可取到上百个）'"
                 @click="openFetchDialog"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" aria-hidden="true">
                   <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke-linecap="round"/>
                   <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
+                <span>{{ fetching ? '拉取中…' : '拉取模型' }}</span>
               </button>
               <!-- 添加模型按钮 -->
               <button class="icon-action-btn icon-action-btn--add icon-action-btn--model-add" @click="openQuickAdd" title="添加模型">

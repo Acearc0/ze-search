@@ -995,3 +995,13 @@ input[type="password"].api-key-input::-ms-reveal {
   font-weight: 700;
   border-radius: 5px;
 }
+
+/* 拉取模型按钮：图标 + 文案，避免纯图标难以发现 */
+.fetch-models-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}

@@ -93,30 +93,16 @@ export const parseCompatibleModels = (json: unknown): FetchedModel[] | null => {
  * 之前按后缀替换推导，遇到 /apps/anthropic 会把路径拼成
  * /apps/anthropic/api/v1/models（已实测 404）。故改用 URL.origin 取主机根。
  */
-const buildCandidates = (base: string): { native: string[]; compatible: string[] } => {
-  const b = String(base || '').trim().replace(/\/+$/, '')
+const resolveUrls = (baseUrl: string): { origin: string; base: string; hasV1: boolean } => {
+  const base = String(baseUrl || '').trim().replace(/\/+$/, '')
   let origin = ''
   try {
-    origin = new URL(b).origin
+    origin = new URL(base).origin
   } catch {
     // base 不是合法 URL 时退回字符串截取（去掉已知路径后缀）
-    origin = b.replace(/\/(compatible-mode|apps\/anthropic|apps\/\w+)(\/v1)?$/i, '')
+    origin = base.replace(/\/(compatible-mode|apps\/anthropic|apps\/\w+)(\/v1)?$/i, '')
   }
-
-  const hasV1 = /\/v1$/i.test(b)
-
-  // 原生端点固定在主机根下，与 base 的具体路径无关
-  const native = [
-    `${origin}/api/v1/models?page_no=1&page_size=100`,
-    `${origin}/api/v1/models`,
-  ]
-
-  // 兼容端点相对 base；已含 /v1 时不再重复
-  const compatible = hasV1
-    ? [`${b}/models`]
-    : [`${b}/v1/models`, `${b}/models`]
-
-  return { native, compatible }
+  return { origin, base, hasV1: /\/v1$/i.test(base) }
 }
 
 const tryFetchModels = async (
@@ -155,7 +141,10 @@ const getFetch = async (): Promise<typeof fetch> => {
 
 /**
  * 拉取模型列表：先试百炼原生端点拿 capabilities，失败回退 OpenAI 兼容端点。
- * 每家 Base URL 写法不同，候选 URL 逐个探测。
+ *
+ * 原生端点分页拉取：百炼账号下常有 300+ 模型，单页 100 会漏掉大半，
+ * 表现为「能拉取但模型数量明显偏少」。最多 10 页（1000 个）后停止。
+ *
  * @param baseUrl 平台 Base URL（如 https://xxx.cn-beijing.maas.aliyuncs.com/compatible-mode）
  * @param apiKey  API Key
  */
@@ -173,24 +162,51 @@ export const fetchBailianModels = async (
     'Content-Type': 'application/json'
   }
 
-  const { native, compatible } = buildCandidates(baseUrl)
+  const { origin, base, hasV1 } = resolveUrls(baseUrl)
+  const statuses: string[] = []
 
-  const nativeTry = await tryFetchModels(fetchFn, native, headers, parseNativeModels, signal)
-  if (nativeTry.models) return { models: nativeTry.models, endpoint: 'native' }
+  // ---- 原生端点：翻页拉全 ----
+  const collected = new Map<string, FetchedModel>()
+  for (let pageNo = 1; pageNo <= 10; pageNo++) {
+    const url = `${origin}/api/v1/models?page_no=${pageNo}&page_size=100`
+    try {
+      const resp = await fetchFn(url, { headers, signal })
+      if (!resp.ok) {
+        statuses.push(`${new URL(url).pathname} → HTTP ${resp.status}`)
+        break
+      }
+      const json = await resp.json()
+      const raw = (json as any)?.output?.models
+      if (!Array.isArray(raw) || raw.length === 0) break
+      for (const m of parseNativeModels(json) ?? []) {
+        if (!collected.has(m.id)) collected.set(m.id, m)
+      }
+      // 本页不满说明已到末页
+      if (raw.length < 100) break
+    } catch (e) {
+      statuses.push(`${new URL(url).pathname} → ${e instanceof Error ? e.message : String(e)}`)
+      break
+    }
+  }
+  if (collected.size > 0) {
+    return { models: [...collected.values()], endpoint: 'native' }
+  }
 
-  const compatibleTry = await tryFetchModels(fetchFn, compatible, headers, parseCompatibleModels, signal)
+  // ---- 回退：OpenAI 兼容端点 ----
+  const compatibleCandidates = hasV1 ? [`${base}/models`] : [`${base}/v1/models`, `${base}/models`]
+  const compatibleTry = await tryFetchModels(fetchFn, compatibleCandidates, headers, parseCompatibleModels, signal)
   if (compatibleTry.models) {
     return {
       models: compatibleTry.models,
       endpoint: 'compatible',
-      error: nativeTry.statuses.length ? `原生端点不可用（${nativeTry.statuses.join('；')}）` : undefined
+      error: statuses.length ? `原生端点不可用（${statuses.join('；')}）` : undefined
     }
   }
 
   return {
     models: [],
     endpoint: 'compatible',
-    error: `全部端点失败 — 原生：${nativeTry.statuses.join('；') || '无响应'}；兼容：${compatibleTry.statuses.join('；') || '无响应'}`
+    error: `全部端点失败 — 原生：${statuses.join('；') || '无响应'}；兼容：${compatibleTry.statuses.join('；') || '无响应'}`
   }
 }
 
