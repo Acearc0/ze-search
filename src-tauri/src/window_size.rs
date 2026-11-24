@@ -1,4 +1,173 @@
-use tauri::{AppHandle, Manager};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, WebviewWindow};
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SavedWindowState {
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+fn state_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("window-state.json"))
+}
+
+/// 读取上次保存的主窗口状态；文件缺失或损坏时返回 None，调用方回退到默认尺寸。
+pub fn load_window_state(app: &AppHandle) -> Option<SavedWindowState> {
+    let path = state_path(app)?;
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<SavedWindowState>(&raw).ok()
+}
+
+fn write_window_state(app: &AppHandle, state: &SavedWindowState) {
+    let Some(path) = state_path(app) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = serde_json::to_string_pretty(state) {
+        let _ = fs::write(path, raw);
+    }
+}
+
+/// 取窗口当前尺寸/位置（逻辑像素）。最大化时不覆盖已保存的正常尺寸，
+/// 否则把「最大化后的尺寸」写进配置，下次还原窗口会变成全屏大小。
+pub fn capture_window_state(
+    window: &WebviewWindow,
+    previous: Option<&SavedWindowState>,
+) -> Option<SavedWindowState> {
+    let maximized = window.is_maximized().unwrap_or(false);
+    if maximized {
+        let mut next = previous.cloned().unwrap_or_default();
+        next.maximized = true;
+        return if next.width > 0.0 && next.height > 0.0 {
+            Some(next)
+        } else {
+            None
+        };
+    }
+
+    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    let size = window.inner_size().ok()?;
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
+    if width < 320.0 || height < 240.0 {
+        return None;
+    }
+
+    let (x, y) = match window.outer_position() {
+        Ok(pos) => (Some(pos.x as f64 / scale), Some(pos.y as f64 / scale)),
+        Err(_) => (
+            previous.and_then(|state| state.x),
+            previous.and_then(|state| state.y),
+        ),
+    };
+
+    Some(SavedWindowState {
+        width,
+        height,
+        x,
+        y,
+        maximized: false,
+    })
+}
+
+/// 把保存的尺寸裁进当前屏幕：换显示器/分辨率变小后，旧尺寸不能超出工作区。
+pub fn fit_saved_state(app: &AppHandle, saved: &SavedWindowState, preset: WindowSizePreset) -> Option<ResolvedWindowSize> {
+    if saved.width < 320.0 || saved.height < 240.0 {
+        return None;
+    }
+    let mut width = saved.width;
+    let mut height = saved.height;
+
+    if let Some(monitor) = app.primary_monitor().ok().flatten() {
+        let scale = monitor.scale_factor().max(1.0);
+        let screen = if preset.use_work_area {
+            &monitor.work_area().size
+        } else {
+            monitor.size()
+        };
+        let max_width = preset.max_width.min(screen.width as f64 / scale);
+        let max_height = preset.max_height.min(screen.height as f64 / scale);
+        width = clamp(width, preset.min_width.min(max_width), max_width);
+        height = clamp(height, preset.min_height.min(max_height), max_height);
+    }
+
+    Some(ResolvedWindowSize {
+        width,
+        height,
+        min_width: preset.min_width.min(width),
+        min_height: preset.min_height.min(height),
+    })
+}
+
+/// 保存的位置是否还落在某块屏幕里（多显示器拔掉后不能把窗口还原到屏幕外）。
+pub fn saved_position_visible(app: &AppHandle, saved: &SavedWindowState) -> Option<(f64, f64)> {
+    let (x, y) = (saved.x?, saved.y?);
+    let monitors = app.available_monitors().ok()?;
+    let visible = monitors.iter().any(|monitor| {
+        let scale = monitor.scale_factor().max(1.0);
+        let pos = monitor.position();
+        let size = monitor.size();
+        let left = pos.x as f64 / scale;
+        let top = pos.y as f64 / scale;
+        let right = left + size.width as f64 / scale;
+        let bottom = top + size.height as f64 / scale;
+        // 至少留出 60px 的可抓取区域，避免只露一条边
+        x + 60.0 < right && y + 20.0 < bottom && x > left - 200.0 && y > top - 40.0
+    });
+    if visible {
+        Some((x, y))
+    } else {
+        None
+    }
+}
+
+/// 挂上主窗口的尺寸记忆：resize/move 时打脏标记，后台线程节流写入；
+/// 关闭窗口时立刻写一次（此时窗口还在，能拿到最终尺寸）。
+pub fn attach_main_window_state(window: &WebviewWindow) {
+    static DIRTY: AtomicBool = AtomicBool::new(false);
+
+    let app = window.app_handle().clone();
+    let win = window.clone();
+    window.on_window_event(move |event| match event {
+        tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+            DIRTY.store(true, Ordering::Relaxed);
+        }
+        tauri::WindowEvent::CloseRequested { .. } => {
+            let previous = load_window_state(&app);
+            if let Some(state) = capture_window_state(&win, previous.as_ref()) {
+                write_window_state(&app, &state);
+            }
+        }
+        _ => {}
+    });
+
+    let handle = app.clone();
+    let _ = std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(900));
+        if !DIRTY.swap(false, Ordering::Relaxed) {
+            continue;
+        }
+        let Some(window) = handle.get_webview_window("main") else { continue };
+        let previous = load_window_state(&handle);
+        if let Some(state) = capture_window_state(&window, previous.as_ref()) {
+            write_window_state(&handle, &state);
+        }
+    });
+}
 
 #[derive(Clone, Copy)]
 pub struct WindowSizePreset {

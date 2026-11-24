@@ -433,33 +433,58 @@ pub fn run() {
             };
             let app_handle = app.handle().clone();
             let main_window_size = resolve_window_size(&app_handle, MAIN_WINDOW_PRESET);
-            
+            // 上次关窗时的尺寸/位置；无效（文件缺失、尺寸过小、屏幕已变）时回退默认布局
+            let saved_window = crate::window_size::load_window_state(&app_handle);
+            let restored_size = saved_window
+                .as_ref()
+                .and_then(|saved| crate::window_size::fit_saved_state(&app_handle, saved, MAIN_WINDOW_PRESET));
+            let restored_position = saved_window
+                .as_ref()
+                .and_then(|saved| crate::window_size::saved_position_visible(&app_handle, saved));
+            let (win_width, win_height, win_min_width, win_min_height) = match restored_size {
+                Some(size) => (size.width, size.height, size.min_width, size.min_height),
+                None => (
+                    main_window_size.width,
+                    main_window_size.height,
+                    main_window_size.min_width,
+                    main_window_size.min_height,
+                ),
+            };
+
             #[cfg(target_os = "macos")]
-            let _main = tauri::WebviewWindowBuilder::new(app, "main", url)
-                .initialization_script_for_all_frames(include_str!("campus_auth.js"))
-                // Agent execution and video-event continuation live in this
-                // webview. WK's default five-minute hidden-view suspension
-                // must not freeze them when the user switches applications.
-                .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
-                .title("")  // macOS 不显示原生标题文字，避免系统/软件主题不一致时标题看不清
-                .inner_size(main_window_size.width, main_window_size.height)
-                .min_inner_size(main_window_size.min_width, main_window_size.min_height)
-                .center()
-                .resizable(true)
-                .decorations(true)
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .build();
-                
+            let _main = {
+                let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
+                    .initialization_script_for_all_frames(include_str!("campus_auth.js"))
+                    // Agent execution and video-event continuation live in this
+                    // webview. WK's default five-minute hidden-view suspension
+                    // must not freeze them when the user switches applications.
+                    .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
+                    .title("")  // macOS 不显示原生标题文字，避免系统/软件主题不一致时标题看不清
+                    .inner_size(win_width, win_height)
+                    .min_inner_size(win_min_width, win_min_height)
+                    .resizable(true)
+                    .decorations(true)
+                    .title_bar_style(tauri::TitleBarStyle::Overlay);
+                let builder = match restored_position {
+                    Some((x, y)) => builder.position(x, y),
+                    None => builder.center(),
+                };
+                builder.build()
+            };
+
             #[cfg(not(target_os = "macos"))]
             let _main = {
                 let builder = tauri::WebviewWindowBuilder::new(app, "main", url)
                     .initialization_script_for_all_frames(include_str!("campus_auth.js"))
                     .title("ZError")
-                    .inner_size(main_window_size.width, main_window_size.height)
-                    .min_inner_size(main_window_size.min_width, main_window_size.min_height)
-                    .center()
+                    .inner_size(win_width, win_height)
+                    .min_inner_size(win_min_width, win_min_height)
                     .resizable(true)
                     .decorations(false);
+                let builder = match restored_position {
+                    Some((x, y)) => builder.position(x, y),
+                    None => builder.center(),
+                };
                 #[cfg(not(windows))]
                 let builder = builder.icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/128x128@2x.png"
@@ -475,6 +500,14 @@ pub fn run() {
                 }
                 built
             };
+
+            // 记住窗口尺寸/位置：resize/move 打脏标记由后台线程节流落盘，关窗时立即写一次
+            if let Ok(ref window) = _main {
+                crate::window_size::attach_main_window_state(window);
+                if saved_window.as_ref().map(|state| state.maximized).unwrap_or(false) {
+                    let _ = window.maximize();
+                }
+            }
 
             #[cfg(target_os = "macos")]
             if let Ok(ref window) = _main {
