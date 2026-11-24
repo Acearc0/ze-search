@@ -78,7 +78,8 @@ export interface AIModel {
   /**
    * 思考预算（thinking_budget）：思考过程最多消耗多少 token，超限后立即作答。
    * 仅 qwen3.5+ / qwen4 系列支持；0 表示不限制（用供应商默认）。
-   * 默认 1024 —— 思考模式实测能占 60% 以上的总耗时，限制长度是首字提速的主要手段。
+   * 默认不单独设置，由 thinkingEffort 推导：low 512 / medium 1024 / high 4096 / max 不限。
+   * 只有需要偏离强度档位时才显式赋值（0 = 强制不限）。
    */
   thinkingBudget?: number
   apiProtocol?: ApiProtocol

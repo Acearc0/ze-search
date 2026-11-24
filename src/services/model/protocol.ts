@@ -48,10 +48,7 @@ export type ThinkingRuntimeOptions = {
   thinkingBudget?: AIModel['thinkingBudget']
 }
 
-/** 思考过程默认上限：不加限制时，思考模型可能连续推理几十秒才出第一个答案字 */
-const DEFAULT_THINKING_BUDGET = 1024
-/** 支持 thinking_budget 的模型：qwen3.5 及以后的混合思考系列（含 qwen4） */
-const THINKING_BUDGET_MODEL_RE = /qwen(?:3\.[5-9]|4)/i
+/** 思考预算只注入给 qwen3.5 及以后的混合思考系列（含 qwen4），其余模型传了会 400 */
 
 const THINKING_EFFORTS: NonNullable<AIModel['thinkingEffort']>[] = ['low', 'medium', 'high', 'max']
 
@@ -65,20 +62,36 @@ const normalizeOffResponsesEffort = (
   return 'minimal'
 }
 
+/**
+ * 思考强度 → 思考预算（token）。
+ * 预算是硬上限，会先于强度生效；两者若各管各的，UI 里选 high/max 也会被默认预算截断，
+ * 所以这里按强度推导预算，强度才是唯一的语义入口。
+ * 0 表示不限制（交给供应商默认值）。
+ */
+const EFFORT_THINKING_BUDGET: Record<NonNullable<AIModel['thinkingEffort']>, number> = {
+  low: 512,
+  medium: 1024,
+  high: 4096,
+  max: 0
+}
+
 export const normalizeThinkingOptions = (options?: ThinkingRuntimeOptions) => {
   const effort = options?.thinkingEffort
+  const effortValue: NonNullable<AIModel['thinkingEffort']> =
+    THINKING_EFFORTS.includes(effort as NonNullable<AIModel['thinkingEffort']>)
+      ? effort!
+      : 'medium'
+  // 显式写了 budget 就用它（高级覆盖），否则跟随强度
   const rawBudget = options?.thinkingBudget
   const budget = Number.isFinite(rawBudget)
     ? Math.max(0, Math.floor(rawBudget as number))
-    : DEFAULT_THINKING_BUDGET
+    : EFFORT_THINKING_BUDGET[effortValue]
   return {
     enable: options?.enableThinking === true,
     offEnableThinkingFalse: options?.thinkingOffEnableThinkingFalse !== false,
     offThinkingTypeDisabled: options?.thinkingOffThinkingTypeDisabled === true,
     offResponsesEffort: normalizeOffResponsesEffort(options),
-    effort: THINKING_EFFORTS.includes(effort as NonNullable<AIModel['thinkingEffort']>)
-      ? effort!
-      : 'medium',
+    effort: effortValue,
     budget
   }
 }
