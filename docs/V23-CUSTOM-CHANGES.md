@@ -1,5 +1,8 @@
 # ZError v2.3.0 定制分支交接文档
 
+> **后续迭代（2026-11-24 ~ 11-26）见 [`docs/V23-HANDOVER-2.md`](./V23-HANDOVER-2.md)**：
+> 模型管理界面、拉取翻页、思考预算、百炼内置联网、窗口尺寸记忆、答题质量修复。
+>
 > 记录本分支相对官方 v2.3.0 的全部改动、设计取舍、踩过的坑与验证方式。
 > 分支：`v23-custom-search`　仓库：`Acearc0/ze-search`（fork）
 > 基线：官方 `Miaozeqiu/ZError` tag `v2.3.0`（commit `5a74092`）
